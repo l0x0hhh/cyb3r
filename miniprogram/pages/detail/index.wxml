@@ -1,0 +1,47 @@
+<view class="page-shell safe-bottom">
+  <view class="topbar">
+    <button class="back-button" bindtap="goBack">‹</button>
+    <text class="topbar-title">设备详情</text>
+  </view>
+
+  <view wx:if="{{loading}}" class="loading-block">正在加载设备详情…</view>
+  <view wx:elif="{{error}}" class="error-state">
+    <text class="empty-state__title">设备暂时不可用</text>
+    <text class="error-state__note">{{error}}</text>
+    <button class="text-button" bindtap="retry">重新加载</button>
+  </view>
+  <block wx:elif="{{device}}">
+    <view class="{{device.mediaClass}}" style="{{device.mediaStyle}}">
+      <view wx:if="{{device.imageSrc}}" class="detail-media__placeholder"></view>
+      <image wx:if="{{device.imageSrc}}" class="{{device.imageClass}} {{device.imageLoaded ? 'detail-image--loaded' : ''}}" src="{{device.imageSrc}}" mode="{{device.displayHeight ? 'aspectFill' : 'widthFix'}}" style="{{device.imageStyle}}" bindload="onImageLoad" />
+      <view wx:else class="detail-media__placeholder">暂无设备图片</view>
+    </view>
+
+    <view class="detail-body">
+      <text class="detail-title">{{device.name}}</text>
+      <text class="detail-model">{{device.model}}</text>
+      <text class="{{device.statusClass}}">{{device.statusText}}</text>
+
+      <view class="detail-facts">
+        <view class="fact-row">
+          <text class="fact-label">存放位置</text>
+          <text class="fact-value">{{device.location || '未填写'}}</text>
+        </view>
+        <view wx:if="{{device.notes}}" class="fact-row">
+          <text class="fact-label">设备说明</text>
+          <text class="fact-value">{{device.notes}}</text>
+        </view>
+      </view>
+
+      <view wx:if="{{device.operationalStatus === 'offline'}}" class="borrower-box">
+        <text class="borrower-box__title">暂时无法借用</text>
+        <text class="borrower-box__value">该设备当前已下线，请联系管理员。</text>
+      </view>
+      <view wx:elif="{{device.status === 'borrowed'}}" class="borrower-box">
+        <text class="borrower-box__title">当前借用情况</text>
+        <text class="borrower-box__value">{{device.borrowerText}}</text>
+      </view>
+      <button wx:elif="{{device.status === 'available'}}" class="primary-button" bindtap="startBorrow">填写信息并借用</button>
+    </view>
+  </block>
+</view>

@@ -1,0 +1,21 @@
+[Unit]
+Description=College Device Management
+After=network.target
+
+[Service]
+Type=simple
+User=deviceapp
+Group=deviceapp
+WorkingDirectory=/opt/device-management
+EnvironmentFile=/etc/device-management.env
+ExecStart=/usr/bin/node /opt/device-management/server.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/device-management
+
+[Install]
+WantedBy=multi-user.target

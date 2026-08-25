@@ -1,0 +1,32 @@
+{
+  "pages": [
+    "pages/borrow/index",
+    "pages/detail/index",
+    "pages/borrow-form/index",
+    "pages/return/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "设备借还",
+    "navigationBarBackgroundColor": "#f0ece4",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f0ece4",
+    "backgroundTextStyle": "light"
+  },
+  "tabBar": {
+    "color": "#77746d",
+    "selectedColor": "#007f91",
+    "backgroundColor": "#fffdf8",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/borrow/index",
+        "text": "借设备"
+      },
+      {
+        "pagePath": "pages/return/index",
+        "text": "还设备"
+      }
+    ]
+  },
+  "sitemapLocation": "sitemap.json"
+}

@@ -1,0 +1,55 @@
+<view class="page-shell safe-bottom">
+  <view class="brand">
+    <image class="brand-mark" src="{{brandEmblem}}" mode="aspectFit" />
+    <view class="brand-copy">
+      <text class="eyebrow">JNU CYBER SECURITY</text>
+      <text class="brand-title">设备借还</text>
+      <text class="brand-subtitle">暨南大学网络空间安全学院</text>
+    </view>
+  </view>
+
+  <view class="section-head">
+    <view>
+      <text class="section-title">可借设备</text>
+      <text class="section-note">在线且当前无人借用</text>
+    </view>
+    <text class="device-count">{{filteredDevices.length}} 台</text>
+  </view>
+
+  <view class="search-box">
+    <text class="search-icon">⌕</text>
+    <input class="search-input" value="{{searchQuery}}" placeholder="搜索名称或型号" placeholder-class="search-placeholder" confirm-type="search" bindinput="onSearchInput" />
+  </view>
+
+  <scroll-view class="category-scroll" scroll-x="true" show-scrollbar="false" enhanced="true">
+    <view class="category-row">
+      <button wx:for="{{categories}}" wx:key="id" class="category-chip {{activeCategory === item.id ? 'category-chip--active' : ''}}" data-id="{{item.id}}" bindtap="onCategoryTap">{{item.name}}</button>
+    </view>
+  </scroll-view>
+
+  <view wx:if="{{loading}}" class="loading-block">正在加载设备…</view>
+  <view wx:elif="{{error}}" class="error-state">
+    <text class="empty-state__title">暂时无法加载</text>
+    <text class="error-state__note">{{error}}</text>
+    <button class="text-button" bindtap="retry">重新加载</button>
+  </view>
+  <view wx:elif="{{!filteredDevices.length}}" class="empty-state">
+    <text class="empty-state__title">暂时没有可借设备</text>
+    <text class="empty-state__note">换个分类或搜索条件再试试。</text>
+  </view>
+  <view wx:else class="device-grid">
+    <view wx:for="{{filteredDevices}}" wx:key="id" class="device-card" data-id="{{item.id}}" bindtap="openDetail">
+      <view class="device-media" style="{{item.mediaStyle}}">
+        <view wx:if="{{item.imageSrc}}" class="device-media__placeholder"></view>
+        <image wx:if="{{item.imageSrc}}" class="device-image {{item.imageLoaded ? 'device-image--loaded' : ''}}" src="{{item.imageSrc}}" mode="aspectFill" lazy-load="true" data-id="{{item.id}}" bindload="onImageLoad" />
+        <view wx:else class="device-media__empty">暂无图片</view>
+      </view>
+      <view class="device-info">
+        <text class="device-category">{{item.categoryName}}</text>
+        <text class="device-name">{{item.name}}</text>
+        <text class="device-model">{{item.model}}</text>
+        <text class="device-location">{{item.location || '位置未填写'}}</text>
+      </view>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,46 @@
+<view class="page-shell safe-bottom">
+  <view class="topbar">
+    <button class="back-button" bindtap="onBack">‹</button>
+    <text class="topbar-title">填写借用信息</text>
+  </view>
+
+  <view wx:if="{{loading}}" class="loading-block">正在加载设备信息…</view>
+  <view wx:elif="{{error}}" class="error-state">
+    <text class="empty-state__title">无法继续借用</text>
+    <text class="error-state__note">{{error}}</text>
+  </view>
+  <view wx:elif="{{device && !device.canBorrow}}" class="empty-state">
+    <text class="empty-state__title">该设备现在无法借用</text>
+    <text class="empty-state__note">设备可能已被借用或暂时下线，请返回列表查看其他设备。</text>
+  </view>
+  <view wx:elif="{{device}}" class="form-panel">
+    <view class="form-intro">
+      <text class="form-device-name">{{device.name}}</text>
+      <text class="form-device-model">{{device.model}}</text>
+    </view>
+
+    <view class="field">
+      <text class="field-label">姓名 <text class="required">*</text></text>
+      <input class="field-input" data-field="borrowerName" value="{{borrowerName}}" placeholder="请输入借用人姓名" bindinput="onInput" />
+    </view>
+    <view class="field">
+      <text class="field-label">学号 / 工号</text>
+      <input class="field-input" data-field="borrowerId" value="{{borrowerId}}" placeholder="选填" bindinput="onInput" />
+    </view>
+    <view class="field">
+      <text class="field-label">完整手机号 <text class="required">*</text></text>
+      <input class="field-input" data-field="borrowerPhone" value="{{borrowerPhone}}" type="number" maxlength="11" placeholder="请输入 11 位手机号" bindinput="onInput" />
+    </view>
+    <view class="field">
+      <text class="field-label">专业 <text class="required">*</text></text>
+      <input class="field-input" data-field="major" value="{{major}}" placeholder="如：网络空间安全" bindinput="onInput" />
+    </view>
+    <view class="field">
+      <text class="field-label">用途 <text class="required">*</text></text>
+      <textarea class="field-textarea" data-field="purpose" value="{{purpose}}" maxlength="300" placeholder="请说明本次借用用途" bindinput="onInput" />
+    </view>
+
+    <text class="form-tip">提交后设备会变为借出状态，请在使用结束后及时归还。</text>
+    <button class="primary-button" loading="{{submitting}}" disabled="{{submitting}}" bindtap="submit">{{submitting ? '提交中…' : '确认借用'}}</button>
+  </view>
+</view>

@@ -1,0 +1,228 @@
+# Ubuntu 公网服务器部署指南
+
+以下方案使用 Node.js 22、systemd、Nginx 和 Let's Encrypt HTTPS。当前项目正式域名为 `cyb3r.art`。
+
+## 1. 准备域名和服务器
+
+在域名控制台添加 A 记录：
+
+```text
+cyb3r.art -> 106.55.186.151
+```
+
+服务器建议使用 Ubuntu 22.04 或 24.04，并开放 TCP 端口 `22`、`80`、`443`。不要向公网开放应用端口 `3000`。
+
+安装基础软件和 Node.js 22：
+
+```bash
+sudo apt update
+sudo apt install -y nginx certbot python3-certbot-nginx curl
+
+curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh
+sudo -E bash /tmp/nodesource_setup.sh
+sudo apt install -y nodejs
+
+node --version
+npm --version
+```
+
+## 2. 创建运行用户和持久化目录
+
+```bash
+sudo useradd --system --create-home --shell /usr/sbin/nologin deviceapp
+sudo mkdir -p /opt/device-management
+sudo mkdir -p /var/lib/device-management/data
+sudo mkdir -p /var/lib/device-management/uploads
+sudo mkdir -p /var/lib/device-management/qrcodes
+```
+
+把源码上传到 `/opt/device-management`。首次部署可以上传源码，但不要上传或覆盖本地 `data/`、`uploads/`、`public/qrcodes/`、`frontend/dist/` 和 `node_modules/`；增量更新必须按 [`skills/sync-device-management/SKILL.md`](skills/sync-device-management/SKILL.md) 逐文件同步。
+
+```bash
+scp -r . root@你的服务器IP:/opt/device-management/
+```
+
+上传完成后，在服务器执行：
+
+```bash
+sudo chown -R deviceapp:deviceapp /opt/device-management
+sudo chown -R deviceapp:deviceapp /var/lib/device-management
+
+cd /opt/device-management
+sudo -u deviceapp npm ci
+sudo -u deviceapp npm run build
+sudo -u deviceapp npm test
+```
+
+生产数据、上传图片、二维码和 `data/email-settings.json` 均以服务器持久化目录为准，禁止用本地目录覆盖。若确需迁移数据，必须先单独备份并确认目标文件，再由管理员执行定向迁移。
+
+## 3. 配置生产环境变量
+
+复制示例并编辑：
+
+```bash
+sudo cp /opt/device-management/deploy/device-management.env.example /etc/device-management.env
+sudo nano /etc/device-management.env
+```
+
+至少修改：
+
+```ini
+ADMIN_PASSWORD=一个至少16位的随机密码
+APP_BASE_URL=https://cyb3r.art
+EMAIL_CONFIG_KEY=32字节随机密钥的 hex 表示（64位）
+```
+
+生成邮件配置加密密钥：
+
+```bash
+openssl rand -hex 32
+```
+
+`EMAIL_CONFIG_KEY` 只保存在 `/etc/device-management.env`，不要写入仓库、部署命令或邮件配置页面。该密钥必须长期保持不变；更换后，既有 `email-settings.json` 中的 SMTP 密码/授权码无法解密，需要管理员重新录入。
+
+保护配置文件：
+
+```bash
+sudo chown root:deviceapp /etc/device-management.env
+sudo chmod 640 /etc/device-management.env
+```
+
+`APP_BASE_URL` 非常重要，新生成的设备二维码会使用这个 HTTPS 地址。
+
+### 3.1 配置管理员邮件通知
+
+1. 填写并重启服务，使 `EMAIL_CONFIG_KEY` 生效。
+2. 登录 `https://cyb3r.art/admin`，打开“邮件通知”Tab。
+3. 录入 SMTP 服务器、端口、加密方式、发件邮箱和邮箱密码/授权码，填写一个或多个接收邮箱，勾选需要通知的借出/归还事件，并保存。
+4. 点击“发送测试邮件”确认 SMTP 可用。保存后的密码不会回显，只显示“凭据已保存”。
+
+系统会在借用、用户归还或管理员归还记录成功写入后异步发送邮件；SMTP 失败只写服务端日志，不影响业务结果。当前没有持久化重试队列，生产上应通过测试邮件和日志确认配置有效。
+
+邮件模板支持 `eventLabel`、`deviceName`、`deviceModel`、`deviceId`、`borrowerName`、`borrowerId`、`borrowerPhone`、`borrowerPhoneMasked`、`major`、`purpose`、`borrowedAt`、`eventAt`、`returnNotes`。默认通知使用脱敏手机号 `138****`。
+
+## 4. 注册 systemd 服务
+
+```bash
+sudo cp /opt/device-management/deploy/device-management.service /etc/systemd/system/device-management.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now device-management
+sudo systemctl status device-management
+```
+
+查看实时日志：
+
+```bash
+sudo journalctl -u device-management -f
+```
+
+本机检查：
+
+```bash
+curl -I http://127.0.0.1:3000/admin
+```
+
+## 5. 配置 Nginx
+
+```bash
+sudo cp /opt/device-management/deploy/nginx.conf /etc/nginx/sites-available/device-management
+sudo nano /etc/nginx/sites-available/device-management
+```
+
+项目提供的配置已使用 `cyb3r.art`，确认无误后执行：
+
+```bash
+sudo ln -s /etc/nginx/sites-available/device-management /etc/nginx/sites-enabled/device-management
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+## 6. 开启 HTTPS
+
+确认域名已经解析到服务器后执行：
+
+```bash
+sudo certbot --nginx -d cyb3r.art
+sudo certbot renew --dry-run
+```
+
+浏览器访问：
+
+```text
+https://cyb3r.art/borrow
+https://cyb3r.art/admin
+```
+
+## 7. 防火墙
+
+如果启用了 UFW：
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 'Nginx Full'
+sudo ufw enable
+sudo ufw status
+```
+
+应用只监听 `3000`，该端口应由 Nginx 在服务器内部访问，不要在云服务器安全组中开放。
+
+## 8. GitHub 私有仓库更新
+
+生产源码通过只读 GitHub Deploy Key 从 `git@github.com:l0x0hhh/cyb3r.git` 拉取。密钥只保存在服务器的 `/var/lib/device-management/.ssh/`，不要提交到仓库，也不要使用个人 GitHub 私钥。
+
+首次接入现有生产源码时，先确认本地代码已经推送到 GitHub，并在服务器备份当前源码目录。生产数据不在应用目录，而是在 `/var/lib/device-management`，不会随源码备份或 Git 更新覆盖：
+
+```bash
+STAMP="$(date +%Y%m%d-%H%M%S)"
+sudo systemctl stop device-management
+sudo mv /opt/device-management "/opt/device-management-before-git-${STAMP}"
+sudo install -d -o deviceapp -g deviceapp -m 755 /opt/device-management
+sudo -u deviceapp env HOME=/var/lib/device-management \
+  GIT_SSH_COMMAND="ssh -i /var/lib/device-management/.ssh/github_deploy -o IdentitiesOnly=yes -o UserKnownHostsFile=/var/lib/device-management/.ssh/known_hosts -o StrictHostKeyChecking=yes" \
+  git clone git@github.com:l0x0hhh/cyb3r.git /opt/device-management
+sudo -u deviceapp env HOME=/var/lib/device-management npm ci --prefix /opt/device-management
+sudo -u deviceapp env HOME=/var/lib/device-management npm run build --prefix /opt/device-management
+sudo systemctl start device-management
+sudo systemctl status device-management
+```
+
+确认首次接入正常后，旧源码备份目录可以保留一段时间，确认无误后再由管理员手动删除。不要删除或移动 `/var/lib/device-management`。
+
+以后每次更新的流程是：本地修改并提交后推送 GitHub，再登录服务器执行：
+
+```bash
+sudo bash /opt/device-management/deploy/update-from-git.sh
+```
+
+该脚本会检查工作区干净、远程地址和分支正确、远程提交是快进更新，并根据变更自动决定是否执行 `npm ci`、`npm run build` 和 systemd 重启。构建或健康检查失败时命令会返回非零状态，不会把失败发布报告为成功；脚本不会修改 `/var/lib/device-management/data`、`uploads`、`qrcodes` 或邮件配置。
+
+如果只想查看是否有更新，可以执行：
+
+```bash
+sudo -u deviceapp env HOME=/var/lib/device-management \
+  GIT_SSH_COMMAND="ssh -i /var/lib/device-management/.ssh/github_deploy -o IdentitiesOnly=yes -o UserKnownHostsFile=/var/lib/device-management/.ssh/known_hosts -o StrictHostKeyChecking=yes" \
+  git -C /opt/device-management fetch --prune origin main
+sudo -u deviceapp git -C /opt/device-management status --short --branch
+```
+
+生产服务占用 3000 端口时不要在服务器执行 `npm test`；测试应在本地完成。
+
+## 9. 数据备份
+
+当前版本使用 JSON 文件保存设备和借用记录，因此必须定期备份：
+
+```bash
+sudo tar -czf /root/device-management-$(date +%F-%H%M).tar.gz /var/lib/device-management
+```
+
+建议通过 cron 每天备份，并将备份同步到另一台机器或对象存储。更新代码时不要覆盖 `/var/lib/device-management`。
+
+## 10. 常见故障
+
+- 页面能打开但接口报错：检查 `sudo journalctl -u device-management -n 100`。
+- Nginx 显示 502：检查应用是否监听 3000，以及 `systemctl status device-management`。
+- 二维码还是旧域名：确认 `APP_BASE_URL`，重启服务后在后台重新生成二维码。
+- 测试邮件发送失败：确认 `EMAIL_CONFIG_KEY` 未变更、后台 SMTP 主机/端口/加密方式与邮箱服务商要求一致，并查看 `sudo journalctl -u device-management -n 100`；QQ、163 等服务通常要求填写授权码而不是网页登录密码。
+- 图片上传失败：仅允许 JPEG、PNG、WebP，最大 5 MB；服务会通过 Sharp 生成 WebP 详情图和缩略图，先确认 `npm install` 已完整安装生产依赖。
+- 旧设备图片加载仍慢：历史图片不会自动转换，可在管理后台重新上传该设备图片以生成优化后的缩略图和详情图。
+- 管理员登录失效：服务重启会清空内存 Session，重新登录即可。

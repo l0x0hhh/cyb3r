@@ -1,0 +1,47 @@
+<view class="page-shell safe-bottom">
+  <view class="brand">
+    <view class="brand-copy">
+      <text class="eyebrow">RETURN DESK</text>
+      <text class="brand-title">归还设备</text>
+      <text class="brand-subtitle">输入借用时填写的信息，查询本人记录</text>
+    </view>
+  </view>
+
+  <view class="return-form">
+    <view class="field">
+      <text class="field-label">姓名 <text class="required">*</text></text>
+      <input class="field-input" data-field="borrowerName" value="{{borrowerName}}" placeholder="请输入借用人姓名" bindinput="onInput" />
+    </view>
+    <view class="field">
+      <text class="field-label">完整手机号 <text class="required">*</text></text>
+      <input class="field-input" data-field="borrowerPhone" value="{{borrowerPhone}}" type="number" maxlength="11" placeholder="请输入 11 位手机号" bindinput="onInput" bindconfirm="lookup" />
+    </view>
+    <button class="primary-button" loading="{{loading}}" disabled="{{loading}}" bindtap="lookup">{{loading ? '查询中…' : '查询待归还设备'}}</button>
+  </view>
+
+  <view wx:if="{{error}}" class="error-state">
+    <text class="error-state__note">{{error}}</text>
+  </view>
+  <view wx:elif="{{searched && !records.length}}" class="empty-state">
+    <text class="empty-state__title">你当前没有待归还设备</text>
+    <text class="empty-state__note">请核对姓名和手机号是否与借用时一致。</text>
+  </view>
+  <view wx:elif="{{records.length}}">
+    <view wx:for="{{records}}" wx:key="recordId" class="return-record">
+      <view class="record-top">
+        <view class="record-image-wrap">
+          <view wx:if="{{item.imageSrc}}" class="record-image-placeholder"></view>
+          <image wx:if="{{item.imageSrc}}" class="record-image {{item.imageLoaded ? 'record-image--loaded' : ''}}" src="{{item.imageSrc}}" mode="aspectFill" lazy-load="true" data-id="{{item.recordId}}" bindload="onImageLoad" />
+          <view wx:else class="record-image-placeholder">暂无图片</view>
+        </view>
+        <view class="record-body">
+          <text class="record-name">{{item.deviceName}}</text>
+          <text class="record-model">{{item.deviceModel}}</text>
+          <text class="record-date">借用时间：{{item.borrowedAtText}}</text>
+        </view>
+      </view>
+      <input class="record-notes" data-id="{{item.recordId}}" value="{{item.returnNotes}}" placeholder="归还备注（选填）" bindinput="onNotesInput" />
+      <button class="record-action" data-id="{{item.recordId}}" loading="{{returningId === item.recordId}}" disabled="{{returningId}}" bindtap="confirmReturn">{{returningId === item.recordId ? '归还中…' : '确认归还'}}</button>
+    </view>
+  </view>
+</view>

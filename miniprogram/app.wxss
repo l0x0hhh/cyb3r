@@ -1,0 +1,675 @@
+page {
+  background: #f0ece4;
+  color: #17343c;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 28rpx;
+}
+
+view,
+text,
+button,
+input,
+textarea,
+scroll-view,
+image {
+  box-sizing: border-box;
+}
+
+button::after {
+  border: 0;
+}
+
+.page-shell {
+  min-height: 100vh;
+  padding: 44rpx 32rpx 150rpx;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  margin-bottom: 48rpx;
+}
+
+.brand-mark {
+  width: 86rpx;
+  height: 86rpx;
+  flex: none;
+  object-fit: contain;
+}
+
+.brand-copy {
+  min-width: 0;
+}
+
+.eyebrow {
+  color: #007f91;
+  font-size: 19rpx;
+  font-weight: 700;
+  letter-spacing: 3rpx;
+}
+
+.brand-title {
+  display: block;
+  margin-top: 6rpx;
+  color: #13313a;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 46rpx;
+  font-weight: 700;
+  letter-spacing: 1rpx;
+  line-height: 1.15;
+}
+
+.brand-subtitle {
+  display: block;
+  margin-top: 8rpx;
+  color: #7b7770;
+  font-size: 22rpx;
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24rpx;
+  margin-bottom: 22rpx;
+}
+
+.section-title {
+  display: block;
+  color: #17343c;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 38rpx;
+  font-weight: 700;
+}
+
+.section-note {
+  display: block;
+  margin-top: 8rpx;
+  color: #8a857d;
+  font-size: 22rpx;
+}
+
+.device-count {
+  flex: none;
+  color: #007f91;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  height: 82rpx;
+  margin-bottom: 22rpx;
+  padding: 0 24rpx;
+  background: #fffdf8;
+  border: 1rpx solid #ded7cb;
+  border-radius: 18rpx;
+  box-shadow: 0 12rpx 28rpx rgba(75, 65, 50, .05);
+}
+
+.search-icon {
+  color: #007f91;
+  font-size: 36rpx;
+  line-height: 1;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+  color: #17343c;
+  font-size: 27rpx;
+}
+
+.category-scroll {
+  width: 100%;
+  margin-bottom: 34rpx;
+  white-space: nowrap;
+}
+
+.category-row {
+  display: inline-flex;
+  gap: 14rpx;
+}
+
+.category-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 62rpx;
+  padding: 0 25rpx;
+  color: #77746d;
+  background: rgba(255, 253, 248, .72);
+  border: 1rpx solid #ded7cb;
+  border-radius: 100rpx;
+  font-size: 24rpx;
+  line-height: 62rpx;
+  white-space: nowrap;
+}
+
+.category-chip--active {
+  color: #fffdf8;
+  background: #007f91;
+  border-color: #007f91;
+}
+
+.device-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22rpx;
+}
+
+.device-card {
+  min-width: 0;
+  overflow: hidden;
+  background: #fffdf8;
+  border: 1rpx solid #e2dbcf;
+  border-radius: 18rpx;
+  box-shadow: 0 14rpx 28rpx rgba(75, 65, 50, .07);
+}
+
+.device-media {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: #f0ece4;
+}
+
+.device-media__placeholder,
+.device-media__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #aaa49a;
+  background: #f0ece4;
+  font-size: 22rpx;
+}
+
+.device-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  filter: blur(15px);
+  transform: scale(1.03);
+  transform-origin: center;
+  transition: opacity .3s ease, filter .6s ease, transform .6s ease;
+}
+
+.device-image--loaded {
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1);
+}
+
+.device-info {
+  min-width: 0;
+  padding: 20rpx 20rpx 22rpx;
+}
+
+.device-category {
+  display: block;
+  overflow: hidden;
+  color: #007f91;
+  font-size: 20rpx;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-name {
+  display: block;
+  overflow: hidden;
+  margin-top: 8rpx;
+  color: #17343c;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 29rpx;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-model,
+.device-location {
+  display: block;
+  overflow: hidden;
+  margin-top: 7rpx;
+  color: #878179;
+  font-size: 21rpx;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-location::before {
+  content: '⌖';
+  margin-right: 6rpx;
+  color: #007f91;
+}
+
+.loading-block,
+.empty-state,
+.error-state {
+  padding: 100rpx 32rpx;
+  color: #89847c;
+  text-align: center;
+}
+
+.empty-state__title {
+  display: block;
+  color: #4c4a45;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 34rpx;
+  font-weight: 700;
+}
+
+.empty-state__note,
+.error-state__note {
+  display: block;
+  margin-top: 16rpx;
+  font-size: 23rpx;
+  line-height: 1.6;
+}
+
+.text-button {
+  display: inline-block;
+  margin-top: 24rpx;
+  padding: 0;
+  color: #007f91;
+  background: transparent;
+  font-size: 24rpx;
+  line-height: 1.5;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  margin-bottom: 28rpx;
+}
+
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 68rpx;
+  height: 68rpx;
+  padding: 0;
+  color: #17343c;
+  background: #fffdf8;
+  border: 1rpx solid #ded7cb;
+  border-radius: 50%;
+  font-size: 38rpx;
+  line-height: 1;
+}
+
+.topbar-title {
+  color: #17343c;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 36rpx;
+  font-weight: 700;
+}
+
+.detail-media {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: #f0ece4;
+  border-radius: 20rpx;
+}
+
+.detail-media--fixed {
+  height: 560rpx;
+}
+
+.detail-media__placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 400rpx;
+  color: #aaa49a;
+  background: #f0ece4;
+  font-size: 24rpx;
+}
+
+.detail-image {
+  display: block;
+  width: 100%;
+  opacity: 0;
+  filter: blur(15px);
+  transform: scale(1.03);
+  transition: opacity .3s ease, filter .6s ease, transform .6s ease;
+}
+
+.detail-image--fixed {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+}
+
+.detail-image--loaded {
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1);
+}
+
+.detail-body {
+  padding: 30rpx 4rpx 0;
+}
+
+.detail-title {
+  display: block;
+  color: #17343c;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 44rpx;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.detail-model {
+  display: block;
+  margin-top: 8rpx;
+  color: #878179;
+  font-size: 24rpx;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  height: 48rpx;
+  margin-top: 22rpx;
+  padding: 0 18rpx;
+  border-radius: 100rpx;
+  font-size: 22rpx;
+  font-weight: 700;
+  line-height: 48rpx;
+}
+
+.status--available {
+  color: #36734e;
+  background: #e4f0e4;
+}
+
+.status--borrowed {
+  color: #9e4c3e;
+  background: #f7e3dc;
+}
+
+.status--offline {
+  color: #77746d;
+  background: #e4e1dc;
+}
+
+.detail-facts {
+  margin: 34rpx 0;
+  padding: 22rpx 0;
+  border-top: 1rpx solid #ded7cb;
+  border-bottom: 1rpx solid #ded7cb;
+}
+
+.fact-row + .fact-row {
+  margin-top: 20rpx;
+}
+
+.fact-label {
+  display: block;
+  color: #989188;
+  font-size: 21rpx;
+}
+
+.fact-value {
+  display: block;
+  margin-top: 5rpx;
+  color: #4d4943;
+  font-size: 25rpx;
+  line-height: 1.55;
+}
+
+.borrower-box {
+  margin: 30rpx 0;
+  padding: 24rpx;
+  background: #fff8eb;
+  border-left: 5rpx solid #e8b14e;
+  border-radius: 12rpx;
+}
+
+.borrower-box__title {
+  display: block;
+  color: #8e6b29;
+  font-size: 23rpx;
+  font-weight: 700;
+}
+
+.borrower-box__value {
+  display: block;
+  margin-top: 10rpx;
+  color: #604d27;
+  font-size: 25rpx;
+  line-height: 1.7;
+}
+
+.primary-button,
+.secondary-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 88rpx;
+  margin-top: 24rpx;
+  border-radius: 14rpx;
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 88rpx;
+}
+
+.primary-button {
+  color: #fffdf8;
+  background: #007f91;
+}
+
+.primary-button[disabled] {
+  opacity: .55;
+}
+
+.secondary-button {
+  color: #007f91;
+  background: #e7f0ee;
+}
+
+.form-panel {
+  padding: 26rpx 0 50rpx;
+}
+
+.form-intro {
+  margin-bottom: 34rpx;
+}
+
+.form-device-name {
+  display: block;
+  color: #17343c;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 38rpx;
+  font-weight: 700;
+}
+
+.form-device-model {
+  display: block;
+  margin-top: 8rpx;
+  color: #89847c;
+  font-size: 23rpx;
+}
+
+.field {
+  margin-top: 26rpx;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 12rpx;
+  color: #4d4943;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.required {
+  color: #b65a49;
+}
+
+.field-input,
+.field-textarea {
+  width: 100%;
+  padding: 20rpx 22rpx;
+  color: #17343c;
+  background: #fffdf8;
+  border: 1rpx solid #ded7cb;
+  border-radius: 14rpx;
+  font-size: 27rpx;
+}
+
+.field-input {
+  height: 82rpx;
+}
+
+.field-textarea {
+  min-height: 170rpx;
+  line-height: 1.55;
+}
+
+.form-tip {
+  display: block;
+  margin-top: 28rpx;
+  color: #89847c;
+  font-size: 21rpx;
+  line-height: 1.6;
+}
+
+.return-form {
+  margin-bottom: 32rpx;
+}
+
+.return-record {
+  margin-top: 24rpx;
+  padding: 22rpx;
+  background: #fffdf8;
+  border: 1rpx solid #e2dbcf;
+  border-radius: 18rpx;
+  box-shadow: 0 12rpx 26rpx rgba(75, 65, 50, .06);
+}
+
+.record-top {
+  display: flex;
+  gap: 18rpx;
+}
+
+.record-image-wrap {
+  position: relative;
+  width: 150rpx;
+  height: 118rpx;
+  flex: none;
+  overflow: hidden;
+  background: #f0ece4;
+  border-radius: 12rpx;
+}
+
+.record-image,
+.record-image-placeholder {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.record-image {
+  opacity: 0;
+  filter: blur(15px);
+  transform: scale(1.03);
+  transition: opacity .3s ease, filter .6s ease, transform .6s ease;
+}
+
+.record-image--loaded {
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1);
+}
+
+.record-image-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #aaa49a;
+  background: #f0ece4;
+  font-size: 20rpx;
+}
+
+.record-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.record-name {
+  display: block;
+  overflow: hidden;
+  color: #17343c;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 29rpx;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-model,
+.record-date {
+  display: block;
+  margin-top: 8rpx;
+  color: #89847c;
+  font-size: 21rpx;
+}
+
+.record-notes {
+  width: 100%;
+  height: 74rpx;
+  margin-top: 20rpx;
+  padding: 16rpx 18rpx;
+  color: #4d4943;
+  background: #f8f4ed;
+  border: 1rpx solid #e4ded4;
+  border-radius: 12rpx;
+  font-size: 23rpx;
+}
+
+.record-action {
+  height: 72rpx;
+  margin-top: 18rpx;
+  color: #fffdf8;
+  background: #007f91;
+  border-radius: 12rpx;
+  font-size: 25rpx;
+  font-weight: 700;
+  line-height: 72rpx;
+}
+
+.record-action[disabled] {
+  opacity: .55;
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@media (min-width: 700px) {
+  .page-shell {
+    max-width: 980rpx;
+    margin: 0 auto;
+  }
+
+  .device-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

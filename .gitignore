@@ -1,0 +1,31 @@
+# Runtime data and generated files must stay outside the source repository.
+node_modules/
+frontend/dist/
+data/
+uploads/
+public/qrcodes/
+
+# Secrets and local environment files.
+.env
+.env.*
+.env.local
+.env.production
+!.env.example
+
+# Local test, browser, staging, and build output.
+coverage/
+output/
+.playwright-cli/
+.playwright-mcp/
+.agents/
+.claude/
+.omo/
+.qa-shot.*
+miniprogram/.git/
+.deploy-staging-*/
+.vite-*/
+.sync/
+*.log
+
+# Local archive artifacts.
+*.tar.gz
