@@ -1,24 +1,26 @@
 # 设备管理项目当前状态
 
 > 最后更新：2026-08-25  
-> 状态页版本：2026.08.25-08  
+> 状态页版本：2026.08.25-09  
 > 用途：供新对话快速恢复上下文；长期规则、架构和接口以 [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) 为准。
 
 ## 当前阶段
 
 本轮管理员分级、密码管理和管理端导航改造已完成并同步服务器：当前 `ADMIN_PASSWORD` 账号首次启动自动迁移为 `admin` 超级管理员；新增管理员账号、删除普通管理员、功能权限配置、按权限保护后端接口和管理员修改密码。管理端导航改为桌面端分组可折叠侧栏、移动端抽屉菜单，设备低频工具收进“更多”菜单。生产浏览器桌面端和移动端验收等待用户手动完成。
 
-本轮一言分类调整已在本地完成：底部一言现在仅请求诗词和哲学分类；尚未同步服务器，备案号仍等待用户提供正式编号后再增加。
+本轮一言分类调整已完成并随 GitHub 首次部署同步服务器：底部一言现在仅请求诗词和哲学分类；备案号仍等待用户提供正式编号后再增加。
 
-本轮 GitHub 部署链路已在本地完成并首次推送：新增 `.gitignore` 保护生产数据、上传图片、二维码、依赖、构建产物和环境文件；新增 `deploy/update-from-git.sh`，服务器接入 `git@github.com:l0x0hhh/cyb3r.git` 后可按变更自动执行快进拉取、依赖安装、前端构建、服务重启和健康检查。服务器 Deploy Key 已由用户配置并通过 `git ls-remote` 访问验证；本地 `main` 首次提交已推送，生产目录首次接入尚未完成。
+本轮 GitHub 部署链路已在本地完成并首次推送：新增 `.gitignore` 保护生产数据、上传图片、二维码、依赖、构建产物和环境文件；新增 `deploy/update-from-git.sh`，服务器接入 `git@github.com:l0x0hhh/cyb3r.git` 后可按变更自动执行快进拉取、依赖安装、前端构建、服务重启和健康检查。服务器 Deploy Key 已由用户配置并通过 `git ls-remote` 访问验证；本地 `main` 首次提交已推送，服务器生产目录已完成首次接入。
+
+本轮普通管理员权限请求修复已在本地完成：`loadData()` 现在仅在当前管理员拥有 `operation-logs` 或 `email-settings` 权限时请求对应接口，避免权限正常但控制台出现无意义的 403；超级管理员和具备对应权限的管理员行为保持不变。尚未同步服务器。
 
 本地已完成：`server.js` 新增 `DATA_DIR/admin-users.json` 管理员账户模型，密码使用 Node `crypto.scrypt` 哈希；超级管理员拥有全部权限，普通管理员权限由白名单控制；新增管理员列表、新增、删除、权限更新和修改密码接口；前端新增对应管理 UI。旧的仅提交密码登录请求继续兼容，默认用户名为 `admin`，可用 `ADMIN_USERNAME` 覆盖。
 
-本地已验证：`node --check server.js`、`node --check frontend/src/main.js` 通过；前端契约测试 **63/63 通过**；`npm test` **135/135 通过**；`npm run build` 通过（仅有既有大包提示）。
+本地已验证：`node --check server.js`、`node --check frontend/src/main.js` 通过；前端契约测试 **64/64 通过**；`npm test` **136/136 通过**；`npm run build` 通过（仅有既有大包提示）。
 
-已同步服务器：上一轮管理员分级、导航和对齐改动已同步；本轮一言分类调整尚未同步。同步范围未包含生产 `DATA_DIR`、上传图片、二维码或本地 `node_modules`。
+已同步服务器：GitHub 首次接入已完成，当前生产源码提交为 `3a4f8ef`，一言诗词/哲学分类已随该版本部署；本轮普通管理员权限请求修复尚未同步。同步范围未包含生产 `DATA_DIR`、上传图片、二维码或本地 `node_modules`。
 
-部署链路状态：本地脚本和文档已完成；GitHub 私有仓库 Deploy Key 访问已验证；本地 `main` 已首次推送（提交 `ab0a71b`），尚未执行服务器 `/opt/device-management` 接入和 Git 部署。
+部署链路状态：本地脚本和文档已完成；GitHub 私有仓库 Deploy Key 访问已验证；服务器 `/opt/device-management` 已接入 `main`，首次 Git 拉取、依赖安装、构建和服务启动均成功，当前提交为 `3a4f8ef`。本次权限请求修复等待下一次 Git 更新。
 
 生产已验证：否。待用户手动验证超级管理员登录、管理员新增/授权/删除、普通管理员权限隔离、修改密码和桌面/390px 移动端导航布局。
 
@@ -132,10 +134,10 @@
 2. 待办：将借出、用户归还、管理员归还改为三套独立邮件主题/正文模板，保留旧单模板配置兼容和独立预览/测试发送。
 3. 用户手动检查桌面端与 390px 移动端 `/borrow`：滚动时“借设备/还设备”导航保持吸顶，半透明模糊背景下文字清晰且没有蓝色滑动线；分类筛选、图片比例、加载过渡和详情图继续正常。
 4. 用户手动检查 `/admin`：滚动时管理端导航保持吸顶且内容经过其后方时能看到轻微模糊；选图后 `H: xxxpx` 为局部玻璃信息牌，原图和亮色选区保持清晰，拖动高度与位置功能不受影响。
-5. 按 `DEPLOY.md` 首次接入步骤，将服务器 `/opt/device-management` 连接到 GitHub；确认 `/borrow`、`/admin` 和服务状态正常后，后续使用 `sudo bash /opt/device-management/deploy/update-from-git.sh` 更新。
-6. 服务器首次 Git 更新后，手动检查 `/borrow` 和 `/admin` 页脚一言是否只请求诗词/哲学分类，并确认服务日志无异常；当前生产仍未验证。
+5. 用 `sudo bash /opt/device-management/deploy/update-from-git.sh` 拉取并构建本次普通管理员权限请求修复；前端变更预计只构建、不重启后端。
+6. 部署后用无 `email-settings`/`operation-logs` 权限的普通管理员登录，确认控制台不再出现这两个 403；超级管理员继续确认邮件通知页面正常。
 7. 如需上线本轮邮件功能，再按 [`skills/sync-device-management/SKILL.md`](../skills/sync-device-management/SKILL.md) 执行增量同步；当前未配置真实 SMTP 凭据。
-6. 非紧急技术债：邮件通知暂无持久化重试队列；另按 [`CODE_STRUCTURE.md`](CODE_STRUCTURE.md) 的建议逐步拆分较大的 `server.js` 和 `frontend/src/main.js`，扩大并发或多实例部署前迁移 JSON 存储和内存会话。
+8. 非紧急技术债：邮件通知暂无持久化重试队列；另按 [`CODE_STRUCTURE.md`](CODE_STRUCTURE.md) 的建议逐步拆分较大的 `server.js` 和 `frontend/src/main.js`，扩大并发或多实例部署前迁移 JSON 存储和内存会话。
 
 ## 部署状态
 

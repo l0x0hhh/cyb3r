@@ -1833,6 +1833,10 @@ const AdminPage = {
     ];
     const isSuperAdmin = Vue.computed(() => adminUser.value?.role === 'super_admin');
     const visibleTabs = Vue.computed(() => tabs.filter(tab => isSuperAdmin.value || adminUser.value?.permissions?.includes(tab.permission)));
+    // 按管理员权限加载受保护数据，避免普通管理员产生无意义的 403 请求。
+    function hasAdminPermission(permission) {
+      return isSuperAdmin.value || adminUser.value?.permissions?.includes(permission);
+    }
     const navigationGroups = [
       { key: 'operations', label: '运营管理', items: tabs.filter(tab => ['devices', 'records', 'all-records', 'archived'].includes(tab.key)) },
       { key: 'configuration', label: '配置管理', items: tabs.filter(tab => ['categories', 'email-notifications'].includes(tab.key)) },
@@ -1896,7 +1900,9 @@ const AdminPage = {
     async function loadData() {
       const requests = await Promise.all([
         apiCall('GET', '/api/devices'), apiCall('GET', '/api/records?includeDeleted=true'), apiCall('GET', '/api/records/active'),
-        apiCall('GET', '/api/categories'), apiCall('GET', '/api/operation-logs'), apiCall('GET', '/api/admin/email-settings')
+        apiCall('GET', '/api/categories'),
+        hasAdminPermission('operation-logs') ? apiCall('GET', '/api/operation-logs') : Promise.resolve({ success: false, skipped: true }),
+        hasAdminPermission('email-settings') ? apiCall('GET', '/api/admin/email-settings') : Promise.resolve({ success: false, skipped: true })
       ]);
       const [dRes, rRes, aRes, cRes, lRes, eRes] = requests;
 

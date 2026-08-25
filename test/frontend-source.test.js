@@ -544,6 +544,12 @@ test('administrator UI supports username login, role-aware management, and passw
   assert.match(source, /删除管理员/);
 });
 
+// 管理员数据加载契约：没有对应权限时不应请求受保护的日志和邮件接口。
+test('administrator data loading gates protected requests by permission', () => {
+  assert.match(source, /hasAdminPermission\('operation-logs'\)\s*\?/);
+  assert.match(source, /hasAdminPermission\('email-settings'\)\s*\?/);
+});
+
 test('administrator navigation groups management areas and supports a mobile drawer', () => {
   assert.match(source, /admin-sidebar/);
   assert.match(source, /运营管理/);
