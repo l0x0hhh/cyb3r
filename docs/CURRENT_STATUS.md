@@ -140,10 +140,8 @@
 2. 待办：将借出、用户归还、管理员归还改为三套独立邮件主题/正文模板，保留旧单模板配置兼容和独立预览/测试发送。
 3. 用户手动检查桌面端与 390px 移动端 `/borrow`：滚动时“借设备/还设备”导航保持吸顶，半透明模糊背景下文字清晰且没有蓝色滑动线；分类筛选、图片比例、加载过渡和详情图继续正常。
 4. 用户手动检查 `/admin`：滚动时管理端导航保持吸顶且内容经过其后方时能看到轻微模糊；选图后 `H: xxxpx` 为局部玻璃信息牌，原图和亮色选区保持清晰，拖动高度与位置功能不受影响。
-5. 用 `sudo bash /opt/device-management/deploy/update-from-git.sh` 拉取并构建本次普通管理员权限请求修复；前端变更预计只构建、不重启后端。
-6. 部署后用无 `email-settings`/`operation-logs` 权限的普通管理员登录，确认控制台不再出现这两个 403；超级管理员继续确认邮件通知页面正常。
-7. 如需上线本轮邮件功能，再按 [`skills/sync-device-management/SKILL.md`](../skills/sync-device-management/SKILL.md) 执行增量同步；当前未配置真实 SMTP 凭据。
-8. 非紧急技术债：邮件通知暂无持久化重试队列；另按 [`CODE_STRUCTURE.md`](CODE_STRUCTURE.md) 的建议逐步拆分较大的 `server.js` 和 `frontend/src/main.js`，扩大并发或多实例部署前迁移 JSON 存储和内存会话。
+5. 如需上线本轮邮件功能，再按 [`skills/sync-device-management/SKILL.md`](../skills/sync-device-management/SKILL.md) 执行增量同步；当前未配置真实 SMTP 凭据。
+6. 非紧急技术债：邮件通知暂无持久化重试队列；另按 [`CODE_STRUCTURE.md`](CODE_STRUCTURE.md) 的建议逐步拆分较大的 `server.js` 和 `frontend/src/main.js`，扩大并发或多实例部署前迁移 JSON 存储和内存会话。
 
 ## 部署状态
 
@@ -163,6 +161,7 @@
 - 本轮 `2026.08.14-16` 已将三种事件独立邮件模板列入待办；当前仍使用共享模板，保持现有配置兼容。
 - 本轮 `2026.08.14-17` 已按增量规则同步共享模板邮件通知和借用统计动效：上传 `server.js`、`email-service.js`、`frontend/src/main.js`、`frontend/index.html`，远端构建和 `device-management` 服务重启已由用户确认完成；未运行 `npm ci`，未上传或覆盖 `data/`、`uploads/`、`qrcodes/`、`frontend/dist/`、`node_modules/`。生产邮件配置继续通过管理员页面完成，并保留 `/var/lib/device-management/data/email-settings.json`。
 - 本轮 `2026.08.14-18` 已由用户在 `/etc/device-management.env` 配置并重启生效 `EMAIL_CONFIG_KEY`；服务器密钥已就绪，尚未录入或验证真实 SMTP 凭据。
+- 本轮 `2026.08.25-11` GitHub 增量部署已完成：生产源码和脚本为 `92ab6bd`，前端构建与 `/borrow`、`/admin` 健康检查通过；用户确认普通管理员权限隔离、无 403 控制台报错和一言显示正常。
 - 部署或同步前必须完整读取 [`../skills/sync-device-management/SKILL.md`](../skills/sync-device-management/SKILL.md)，并保护服务器持久化目录。
 
 ## 新对话接续方式
