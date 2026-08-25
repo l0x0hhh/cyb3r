@@ -37,10 +37,11 @@ done
 export GIT_SSH_COMMAND="ssh -i ${KEY_FILE} -o IdentitiesOnly=yes -o UserKnownHostsFile=${KNOWN_HOSTS} -o StrictHostKeyChecking=yes"
 
 as_app() {
+  # Keep service-user commands inside the application tree regardless of the caller's cwd.
   sudo -u "${RUN_USER}" env \
     HOME="${PERSIST_DIR}" \
     GIT_SSH_COMMAND="${GIT_SSH_COMMAND}" \
-    "$@"
+    bash -c 'cd "$1" && shift && exec "$@"' bash "${APP_DIR}" "$@"
 }
 
 git_cmd() {
@@ -73,43 +74,54 @@ git_cmd fetch --prune origin "${BRANCH}"
 target_ref="origin/${BRANCH}"
 target_commit="$(git_cmd rev-parse --verify "${target_ref}")"
 
-[[ "${before_commit}" != "${target_commit}" ]] || {
-  log "Already up to date at ${before_commit}"
-  exit 0
-}
-
-git_cmd merge-base --is-ancestor "${before_commit}" "${target_commit}" \
-  || fail "Remote history is not a fast-forward from ${before_commit}; no files were changed."
-
-for forbidden_path in data uploads public/qrcodes frontend/dist node_modules .env .env.local .env.production; do
-  tracked_forbidden="$(git_cmd ls-tree -r --name-only "${target_ref}" -- "${forbidden_path}" || true)"
-  [[ -z "${tracked_forbidden}" ]] || fail "Remote commit tracks protected path ${forbidden_path}; deployment stopped."
-done
-
 changed_files="$(git_cmd diff --name-only "${before_commit}" "${target_commit}")"
 needs_npm_ci=false
 needs_build=false
 needs_restart=false
+script_changed=false
 
-if [[ -n "${changed_files}" ]]; then
-  while IFS= read -r changed_path; do
-    case "${changed_path}" in
-      package.json|package-lock.json)
-        needs_npm_ci=true
-        needs_build=true
-        needs_restart=true
-        ;;
-      server.js|email-service.js)
-        needs_restart=true
-        ;;
-      frontend/*|vite.config.js|public/*)
-        needs_build=true
-        ;;
-      deploy/device-management.service|deploy/nginx.conf|deploy/setup-server.sh)
-        log "System configuration source changed: ${changed_path}; live system config is not applied by this script."
-        ;;
-    esac
-  done <<< "${changed_files}"
+if [[ "${before_commit}" == "${target_commit}" ]]; then
+  log "Already up to date at ${before_commit}"
+else
+  git_cmd merge-base --is-ancestor "${before_commit}" "${target_commit}" \
+    || fail "Remote history is not a fast-forward from ${before_commit}; no files were changed."
+
+  for forbidden_path in data uploads public/qrcodes frontend/dist node_modules .env .env.local .env.production; do
+    tracked_forbidden="$(git_cmd ls-tree -r --name-only "${target_ref}" -- "${forbidden_path}" || true)"
+    [[ -z "${tracked_forbidden}" ]] || fail "Remote commit tracks protected path ${forbidden_path}; deployment stopped."
+  done
+
+  if [[ -n "${changed_files}" ]]; then
+    while IFS= read -r changed_path; do
+      case "${changed_path}" in
+        package.json|package-lock.json)
+          needs_npm_ci=true
+          needs_build=true
+          needs_restart=true
+          ;;
+        server.js|email-service.js)
+          needs_restart=true
+          ;;
+        frontend/*|vite.config.js|public/*)
+          needs_build=true
+          ;;
+        deploy/update-from-git.sh)
+          script_changed=true
+          ;;
+        deploy/device-management.service|deploy/nginx.conf|deploy/setup-server.sh)
+          log "System configuration source changed: ${changed_path}; live system config is not applied by this script."
+          ;;
+      esac
+    done <<< "${changed_files}"
+  fi
+
+  log "Fast-forwarding ${BRANCH} from ${before_commit} to ${target_commit}"
+  git_cmd merge --ff-only "${target_ref}"
+
+  if [[ "${script_changed}" == true ]]; then
+    log "Deployment script changed; continuing with the updated script"
+    exec bash "${APP_DIR}/deploy/update-from-git.sh"
+  fi
 fi
 
 [[ -x "${APP_DIR}/node_modules/.bin/vite" ]] || {
@@ -118,8 +130,21 @@ fi
   needs_restart=true
 }
 
-log "Fast-forwarding ${BRANCH} from ${before_commit} to ${target_commit}"
-git_cmd merge --ff-only "${target_ref}"
+# Recover an interrupted deployment even when the source commit is already current.
+frontend_dist_index="${APP_DIR}/frontend/dist/index.html"
+if [[ ! -f "${frontend_dist_index}" ]]; then
+  log "Frontend build output is missing or older than its inputs"
+  needs_build=true
+elif [[ -n "$(find \
+  "${APP_DIR}/frontend/src" \
+  "${APP_DIR}/frontend/index.html" \
+  "${APP_DIR}/vite.config.js" \
+  -type f \
+  -newer "${APP_DIR}/frontend/dist/index.html" \
+  -print -quit 2>/dev/null)" ]]; then
+  log "Frontend build output is missing or older than its inputs"
+  needs_build=true
+fi
 
 if [[ "${needs_npm_ci}" == true ]]; then
   log "Installing locked Node.js dependencies"

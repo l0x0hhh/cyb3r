@@ -1,8 +1,8 @@
 # 学院设备管理系统持续说明书
 
 > 最后更新：2026-08-25  
-> 文档版本：2026.08.25-09  
-> 当前代码验证：`node --check server.js`、`node --check frontend/src/main.js`、前端契约测试 64/64、`npm test` 136/136、`npm run build` 均通过（仅有既有大包提示）；服务器 GitHub 首次接入已完成并运行提交 3a4f8ef，本轮普通管理员权限请求修复尚未同步
+> 文档版本：2026.08.25-10
+> 当前代码验证：`node --check server.js`、`node --check frontend/src/main.js`、`bash -n deploy/update-from-git.sh`、同步回归测试 6/6、`npm test` 140/140、`npm run build` 均通过（仅有既有大包提示）；服务器源码已快进到 16337be，但本次构建因旧脚本工作目录问题失败，服务未重启
 
 这份文档是项目的长期产品规则、代码地图和交接说明。新任务应先阅读 [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) 获取短期工作状态，再阅读本文件并按任务需要查看少量源码。详细的单次设计不在这里重复，统一门户设计见 [`docs/plans/2026-07-21-unified-device-portal-design.md`](plans/2026-07-21-unified-device-portal-design.md)。
 
@@ -444,7 +444,7 @@ npm run build
 | `QR_DIR` | 二维码目录 |
 | `EMAIL_CONFIG_KEY` | 32 字节随机密钥（hex 64 位或 base64），用于 AES-256-GCM 加密 `email-settings.json` 中的 SMTP 密码/授权码；必须长期保持不变，不写入仓库 |
 
-首次部署优先参考 `deploy/setup-server.sh`。生产源码接入 GitHub 后，日常更新使用 `deploy/update-from-git.sh`：服务器以 `deviceapp` 通过只读 Deploy Key 执行快进拉取，只有依赖、前端或后端确实变化时才安装依赖、构建或重启。脚本会在 npm 操作前运行 `namei -l` 和 `sudo -u deviceapp test -r`，工作区不干净、远端不是快进或远端提交跟踪受保护路径时直接停止。手动增量上传仍必须先使用 `skills/sync-device-management/SKILL.md` 分类实际改动；PowerShell `scp -r` 上传的暂存目录可能属于 `ubuntu:ubuntu` 且权限为 `0700`，严禁使用 `sudo cp -a <stage>/. /opt/device-management/` 将暂存目录元数据复制到应用树；必须对每个变更文件执行 `sudo install -D -o deviceapp -g deviceapp -m 0644 <staged-file> <target-file>`，可执行脚本才使用 `0755`。自动化测试优先在本地运行；生产服务占用 3000 端口时不要直接运行集成测试。任何更新都必须保留 `/var/lib/device-management`，禁止上传本地 `data/`、`uploads/` 和 `public/qrcodes/` 覆盖生产数据。
+首次部署优先参考 `deploy/setup-server.sh`。生产源码接入 GitHub 后，日常更新使用 `deploy/update-from-git.sh`：服务器以 `deviceapp` 通过只读 Deploy Key 执行快进拉取，只有依赖、前端或后端确实变化时才安装依赖、构建或重启；所有 Git、npm 和 Node 命令都会先切换到 `/opt/device-management`，避免继承 SSH 调用者的当前目录；如果本次拉取包含更新脚本，当前进程会自动用仓库中的新版本继续执行。脚本还会在提交已是最新时检查 `frontend/dist/index.html` 是否缺失或早于 `frontend/src`、入口和 Vite 配置，支持上次构建中断后的再次运行自动恢复。脚本会在 npm 操作前运行 `namei -l` 和 `sudo -u deviceapp test -r`，工作区不干净、远端不是快进或远端提交跟踪受保护路径时直接停止。手动增量上传仍必须先使用 `skills/sync-device-management/SKILL.md` 分类实际改动；PowerShell `scp -r` 上传的暂存目录可能属于 `ubuntu:ubuntu` 且权限为 `0700`，严禁使用 `sudo cp -a <stage>/. /opt/device-management/` 将暂存目录元数据复制到应用树；必须对每个变更文件执行 `sudo install -D -o deviceapp -g deviceapp -m 0644 <staged-file> <target-file>`，可执行脚本才使用 `0755`。自动化测试优先在本地运行；生产服务占用 3000 端口时不要直接运行集成测试。任何更新都必须保留 `/var/lib/device-management`，禁止上传本地 `data/`、`uploads/` 和 `public/qrcodes/` 覆盖生产数据。
 
 ## 10. 当前状态与下一步
 
@@ -461,6 +461,7 @@ npm run build
 - 2026-08-25 管理端页脚移至 `.admin-layout` 外层，侧栏和主内容区共同占满剩余高度，短页面页脚贴近底部、长页面保持自然滚动。
 - 2026-08-25 桌面端收起侧栏的箭头改为几何图形，收起态菜单图标改用固定方形可用区居中；移动端抽屉与展开侧栏保持原布局。
 - 2026-08-25 普通管理员登录后的初始数据请求按 `operation-logs`、`email-settings` 权限分流；无权限账号不再请求受保护接口并产生 403，超级管理员和授权管理员仍加载对应数据；本地已验证，等待 GitHub 部署。
+- 2026-08-25 GitHub 增量部署首次运行已成功 fetch/快进到 `16337be`，但旧脚本因继承 `/home/ubuntu` 当前目录导致构建读取 `package.json` 报 `EACCES`；服务未重启。更新脚本已修复为固定应用目录执行，拉取到脚本更新时自动切换版本，并增加前端产物缺失/过期恢复检查，待推送后重新运行服务器脚本。
 
 - 核心功能与学院品牌化界面已经完成，已新增 `docs/CODE_STRUCTURE.md` 作为详细代码定位地图。
 - 2026-07-24 人工截图复核发现的用户端和移动端管理 UI 问题已在本地修复：分类标签图标移除为纯文字；借还导航蓝线移除；瀑布流卡片按照片比例排列并增加自然尺寸兜底，卡片底部移除隐藏操作占位；管理员图片上传改为截图工具式高度/位置选区，详情页按保存高度和位置全宽铺满；分类管理拖动时其他行跟随移动；移动端管理 Tab 文案不换行；筛选数量带动画；下线确认顺序和设备分类必填规则已补齐。随后补充所有图片媒体容器的 `#f0ece4` 主色占位和模糊渐显过渡，移除旧渐变占位。
@@ -550,6 +551,7 @@ npm run build
 | 2026-08-25 | 2026.08.25-07 | 新增 GitHub 私有仓库日常部署链路：补充敏感数据忽略规则、服务器快进更新脚本和首次接入/日常更新说明；生产数据、上传图片、二维码和密钥继续留在服务器持久化位置 | `bash -n deploy/update-from-git.sh`、文档和忽略规则检查通过；尚未把本地项目首次推送到 GitHub，尚未接入生产目录 |
 | 2026-08-25 | 2026.08.25-08 | 初始化外层 Git 仓库并将完整项目首次推送到私有 GitHub `main` 分支；小程序源码按普通文件纳入，保留本地内层 Git 历史；一言分类调整随提交进入仓库 | 暂存审查排除生产数据、上传图片、二维码、依赖、构建产物和密钥；提交 `ab0a71b` 已推送成功；服务器首次接入随后完成 |
 | 2026-08-25 | 2026.08.25-09 | 修复普通管理员初始加载无权限日志和邮件接口造成的控制台 403：新增权限判断并跳过无权限请求；补充前端契约测试；记录 GitHub 首次部署已完成，下一步用更新脚本验证前端增量部署 | `node --check`、前端契约测试 64/64、`npm test` 136/136、`npm run build` 通过；本地提交待推送，服务器当前仍为 `3a4f8ef` |
+| 2026-08-25 | 2026.08.25-10 | 修复 GitHub 增量更新脚本继承调用者当前目录导致的构建失败；所有服务用户命令固定在应用目录，拉取脚本更新后自动切换到新版本，并在提交已最新时检测缺失/过期前端产物以支持失败恢复；补充脚本回归测试 | `bash -n deploy/update-from-git.sh`、同步回归测试 6/6、`npm test` 140/140、`npm run build` 通过；服务器源码已到 `16337be` 但旧脚本构建失败，服务未重启，待推送修复后重新运行 |
 | 2026-08-24 | 2026.08.24-06 | 微调侧栏“当前借出”和“已归档”数量徽标的垂直位置，使数字更贴合导航文字 | 新增徽标对齐契约；尚未同步服务器，等待浏览器验收 |
 
 | 2026-08-20 | 2026.08.20-01 | 新增管理员分级与密码管理：现有环境账号迁移为 `admin` 超级管理员；新增 `admin-users.json`、scrypt 密码哈希、超级管理员账号 CRUD、普通管理员功能权限白名单、用户名登录、角色感知 Tab 和修改密码弹窗；未同步服务器 | `node --check server.js`、`node --check frontend/src/main.js`、服务端/前端/安全回归测试 111/111 通过；独立临时目录 Vite 构建通过；默认 `frontend/dist` 受已有文件占用影响未清理，等待用户浏览器和生产验证 |
