@@ -162,6 +162,8 @@ app.use('/qrcodes', express.static(QR_DIR));
 app.use(express.static(STATIC_DIR, { index: false }));
 
 // 文件上传配置
+// 图片允许保留相机原图上传，处理完成后只持久化压缩后的 WebP 变体。
+const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
 const IMAGE_EXTENSIONS = new Map([
   ['image/jpeg', '.jpg'],
   ['image/png', '.png'],
@@ -186,7 +188,7 @@ const upload = multer({
     cb(null, true);
   },
   limits: {
-    fileSize: 5 * 1024 * 1024,
+    fileSize: MAX_IMAGE_UPLOAD_BYTES,
     files: 1,
     fields: 10,
     parts: 11
@@ -1935,7 +1937,9 @@ app.get('/', (req, res) => {
 
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError || ['INVALID_IMAGE_TYPE', 'IMAGE_PROCESSING_FAILED'].includes(err.code)) {
-    return res.status(400).json({ success: false, message: err.message });
+    // 统一上传错误提示，避免 Multer 的英文默认信息暴露给管理员。
+    const message = err.code === 'LIMIT_FILE_SIZE' ? '图片不能超过 20 MB' : err.message;
+    return res.status(400).json({ success: false, message });
   }
   next(err);
 });

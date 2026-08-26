@@ -52,6 +52,26 @@ test('device image picker advertises only safe raster formats', () => {
   assert.doesNotMatch(source, /accept="image\/\*"/);
 });
 
+// 图片上传契约：客户端提前拦截超过 20 MB 的文件，减少无效网络传输。
+test('device image picker rejects files larger than 20 MB before upload', () => {
+  assert.match(source, /MAX_IMAGE_UPLOAD_BYTES\s*=\s*20\s*\*\s*1024\s*\*\s*1024/);
+  assert.match(source, /file\.size\s*>\s*MAX_IMAGE_UPLOAD_BYTES/);
+  assert.match(source, /图片不能超过 20 MB/);
+});
+
+// 编辑设备契约：已有图片也必须提供明确的替换入口。
+test('administrator can explicitly replace an existing device image', () => {
+  assert.match(source, /image-crop-editor__replace/);
+  assert.match(source, /更换图片/);
+  assert.match(source, /@click\.stop="triggerUpload"/);
+});
+
+// 构建契约：ExcelJS 只在管理端工作簿操作发生时动态加载。
+test('ExcelJS is dynamically loaded instead of entering the initial bundle', () => {
+  assert.doesNotMatch(source, /import\s+ExcelJS\s+from\s+['"]exceljs['"]/);
+  assert.match(source, /import\(['"]exceljs['"]\)/);
+});
+
 test('return page queries by exact name and full phone before returning', () => {
   assert.match(borrowPageSource, /returnLookup\.borrowerName/);
   assert.match(borrowPageSource, /returnLookup\.borrowerPhone/);
@@ -603,7 +623,8 @@ test('administrator places low-frequency tabs after categories with matching ico
 
 // 批量导入导出统一使用真实 XLSX、多列中文表头和提交前预览。
 test('administrator device batch import and export uses an XLSX preview workflow', () => {
-  assert.match(source, /import ExcelJS from 'exceljs'/);
+  assert.match(source, /loadExcelJS/);
+  assert.match(source, /import\('exceljs'\)/);
   assert.match(source, /设备名称[\s\S]*设备型号[\s\S]*设备分类[\s\S]*存放位置[\s\S]*设备说明/);
   assert.match(source, /accept="\.xlsx"/);
   assert.match(source, /downloadDeviceImportTemplate/);

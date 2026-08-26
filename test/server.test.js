@@ -809,6 +809,26 @@ test('privacy and administrator record-management contract', async t => {
     assert.match(imageResponse.headers.get('cache-control') || '', /immutable/);
   });
 
+  // 上传边界契约：超过 20 MB 的文件必须在服务端被拒绝。
+  await t.test('image uploads over 20 MB are rejected by the server', async () => {
+    const oversizedImage = new Uint8Array(20 * 1024 * 1024 + 1);
+    const form = new FormData();
+    form.append('name', '超大图片测试设备');
+    form.append('model', 'IMG-LIMIT');
+    form.append('category', 'cat-camera');
+    form.append('image', new Blob([oversizedImage], { type: 'image/png' }), 'oversized.png');
+
+    const { response, body } = await request('/api/devices', {
+      method: 'POST',
+      headers: { 'x-session-id': sessionId },
+      body: form
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(body.success, false);
+    assert.match(body.message, /大于|超过|20/);
+  });
+
   await t.test('active borrowing records cannot be archived', async () => {
     const borrowed = await request('/api/records/borrow', {
       method: 'POST',
