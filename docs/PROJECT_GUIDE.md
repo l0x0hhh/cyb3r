@@ -1,8 +1,8 @@
 # 学院设备管理系统持续说明书
 
 > 最后更新：2026-08-26
-> 文档版本：2026.08.26-03
-> 当前代码验证：阶段 1 的 `node --check server.js`、`node --check frontend/src/main.js`、前端契约测试和后端契约测试已通过；本轮旧图片迁移测试 2/2、完整 `npm test` 146/146 已通过；临时输出目录构建和用户本机标准 `npm run build` 均通过，并生成独立 ExcelJS 分包；服务器同步待后续确认
+> 文档版本：2026.08.26-05
+> 当前代码验证：阶段 1 的 `node --check server.js`、`node --check frontend/src/main.js`、前端契约测试和后端契约测试已通过；本轮旧图片迁移测试 2/2、完整 `npm test` 148/148 已通过；`bash -n deploy/update-from-git.sh` 通过；当前本机标准 `npm run build` 受既有 `frontend/dist/assets` ACL 阻塞，临时输出目录构建通过并生成独立 ExcelJS 分包；生产源码已同步到 `f2edf67`，旧图迁移已更新 14 台设备并生成 28 个 WebP 变体，用户已确认服务和生产图片加载正常；本轮健康检查重试和 Nginx 模板修复尚未同步生产
 
 这份文档是项目的长期产品规则、代码地图和交接说明。新任务应先阅读 [`docs/CURRENT_STATUS.md`](CURRENT_STATUS.md) 获取短期工作状态，再阅读本文件并按任务需要查看少量源码。详细的单次设计不在这里重复，统一门户设计见 [`docs/plans/2026-07-21-unified-device-portal-design.md`](plans/2026-07-21-unified-device-portal-design.md)。
 
@@ -448,13 +448,13 @@ npm run build
 | `QR_DIR` | 二维码目录 |
 | `EMAIL_CONFIG_KEY` | 32 字节随机密钥（hex 64 位或 base64），用于 AES-256-GCM 加密 `email-settings.json` 中的 SMTP 密码/授权码；必须长期保持不变，不写入仓库 |
 
-首次部署优先参考 `deploy/setup-server.sh`。生产源码接入 GitHub 后，日常更新使用 `deploy/update-from-git.sh`：服务器以 `deviceapp` 通过只读 Deploy Key 执行快进拉取，只有依赖、前端或后端确实变化时才安装依赖、构建或重启；所有 Git、npm 和 Node 命令都会先切换到 `/opt/device-management`，避免继承 SSH 调用者的当前目录；如果本次拉取包含更新脚本，当前进程会自动用仓库中的新版本继续执行。脚本还会在提交已是最新时检查 `frontend/dist/index.html` 是否缺失或早于 `frontend/src`、入口和 Vite 配置，支持上次构建中断后的再次运行自动恢复。脚本会在 npm 操作前运行 `namei -l` 和 `sudo -u deviceapp test -r`，工作区不干净、远端不是快进或远端提交跟踪受保护路径时直接停止。手动增量上传仍必须先使用 `skills/sync-device-management/SKILL.md` 分类实际改动；PowerShell `scp -r` 上传的暂存目录可能属于 `ubuntu:ubuntu` 且权限为 `0700`，严禁使用 `sudo cp -a <stage>/. /opt/device-management/` 将暂存目录元数据复制到应用树；必须对每个变更文件执行 `sudo install -D -o deviceapp -g deviceapp -m 0644 <staged-file> <target-file>`，可执行脚本才使用 `0755`。自动化测试优先在本地运行；生产服务占用 3000 端口时不要直接运行集成测试。任何更新都必须保留 `/var/lib/device-management`，禁止上传本地 `data/`、`uploads/` 和 `public/qrcodes/` 覆盖生产数据。
+首次部署优先参考 `deploy/setup-server.sh`。生产源码接入 GitHub 后，日常更新使用 `deploy/update-from-git.sh`：服务器以 `deviceapp` 通过只读 Deploy Key 执行快进拉取，只有依赖、前端或后端确实变化时才安装依赖、构建或重启；所有 Git、npm 和 Node 命令都会先切换到 `/opt/device-management`，避免继承 SSH 调用者的当前目录；如果本次拉取包含更新脚本，当前进程会自动用仓库中的新版本继续执行。脚本还会在提交已是最新时检查 `frontend/dist/index.html` 是否缺失或早于 `frontend/src`、入口和 Vite 配置，支持上次构建中断后的再次运行自动恢复；服务重启后的 `/borrow` 和 `/admin` 健康检查会自动重试连接拒绝，覆盖 Node 监听稍慢的启动窗口。脚本会在 npm 操作前运行 `namei -l` 和 `sudo -u deviceapp test -r`，工作区不干净、远端不是快进或远端提交跟踪受保护路径时直接停止。`deploy/nginx.conf` 的上传请求体模板为 `22m`，给应用层严格的 20 MiB 文件限制预留 multipart 封装开销；该配置属于系统配置，更新脚本不会自动写入 `/etc` 或 reload Nginx，生产应用前需单独确认。手动增量上传仍必须先使用 `skills/sync-device-management/SKILL.md` 分类实际改动；PowerShell `scp -r` 上传的暂存目录可能属于 `ubuntu:ubuntu` 且权限为 `0700`，严禁使用 `sudo cp -a <stage>/. /opt/device-management/` 将暂存目录元数据复制到应用树；必须对每个变更文件执行 `sudo install -D -o deviceapp -g deviceapp -m 0644 <staged-file> <target-file>`，可执行脚本才使用 `0755`。自动化测试优先在本地运行；生产服务占用 3000 端口时不要直接运行集成测试。任何更新都必须保留 `/var/lib/device-management`，禁止上传本地 `data/`、`uploads/` 和 `public/qrcodes/` 覆盖生产数据。
 
 ## 10. 当前状态与下一步
 
 ### 当前工作焦点
 
-- 2026-08-26 上传与首包性能优化阶段 2 已在本地完成：新增可预览、幂等的旧图片 WebP 变体迁移命令；阶段 1 已将图片上传上限提升至 20 MB、管理员编辑支持更换图片，并将 ExcelJS 改为实际使用工作簿功能时动态加载。完整测试已通过；用户已执行本地迁移且 11 台设备均无需更新；生产持久化目录迁移和本轮服务器同步等待后续确认。
+- 2026-08-26 上传与首包性能优化阶段 2 已完成生产验证：旧图片 WebP 迁移已处理 14 台设备并生成 28 个变体；阶段 1 的 20 MB 上传上限、管理员更换图片和 ExcelJS 动态加载已完成；健康检查重试和 Nginx `22m` 模板修复已在本地完成，等待推送后同步服务器，其中 Nginx reload 仍需单独人工执行。
 - 2026-08-24 管理端导航改造已完成并同步服务器：原单行标签栏替换为分组可折叠侧栏，移动端改为抽屉菜单，低频设备工具收进“更多”；等待用户浏览器验收。
 - 2026-08-24 管理端模板解析问题已修复并同步服务器：补齐布局容器闭合关系，并将图片 `<source>` 标签改为明确自闭合，避免 Vue `compiler-24` 运行时错误导致页面空白；等待用户浏览器验收。
 - 2026-08-24 已重新生成本地 `frontend/dist`，本地服务返回最新 `index-CAelVA08.js`，避免浏览器继续加载旧构建资源。
@@ -541,6 +541,7 @@ npm run build
 
 ## 12. 迭代记录
 
+| 2026-08-26 | 2026.08.26-04 | 完成生产同步和旧图片 WebP 迁移：服务器源码与构建更新到 `f2edf67`，生产迁移处理 14 台设备并生成 28 个 WebP 变体，保留原始 JPG/PNG；用户确认服务恢复、设备图片请求已切换 WebP，首屏加载明显改善；记录部署脚本健康检查因重启后立即请求而产生一次假失败 | `systemctl` 显示 `device-management` 为 `active (running)`，Node 监听 `*:3000`；`/borrow`、`/admin` 入口可访问；生产迁移输出 `scanned=14 updated=14 created=28`；用户浏览器 Network 已确认 WebP；健康检查重试脚本仍待后续修复 |
 | 2026-08-26 | 2026.08.26-02 | 完成上传与首包性能优化阶段 2：新增可预览、幂等的旧图片详情/缩略 WebP 迁移命令；阶段 1 的 20 MB 上传上限、管理员换图和 ExcelJS 动态加载已纳入长期规则 | 旧图片迁移专项测试 2/2、完整 `npm test` 146/146 通过；清理 3 条重复前端契约；临时输出目录构建通过并生成独立 ExcelJS 分包；用户本地迁移无变更，生产同步待后续确认 |
 | 2026-08-26 | 2026.08.26-03 | 用户确认正常 PowerShell 中的标准 `npm run build` 通过；此前构建失败仅限 CC 沙箱清理既有 `frontend/dist` 时的权限环境 | 本机标准构建、完整 `npm test` 146/146 和迁移专项测试 2/2 均通过；服务器同步待后续确认 |
 | 2026-08-24 | 2026.08.24-01 | 管理端导航改为运营、配置、分析、系统四组可折叠侧栏；移动端使用抽屉菜单；账户区保留修改密码和退出；设备低频工具收进“更多”菜单 | `node --check server.js`、`node --check frontend/src/main.js`、`npm test` 131/131、`npm run build` 通过；尚未同步服务器，等待桌面端和 390px 移动端手动验收 |

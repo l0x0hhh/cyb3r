@@ -8,6 +8,7 @@ const skillPath = path.resolve(__dirname, '../skills/sync-device-management/SKIL
 const skill = fs.readFileSync(skillPath, 'utf8');
 const updateScriptPath = path.resolve(__dirname, '../deploy/update-from-git.sh');
 const updateScript = fs.readFileSync(updateScriptPath, 'utf8');
+const nginxConfig = fs.readFileSync(path.resolve(__dirname, '../deploy/nginx.conf'), 'utf8');
 
 test('sync skill installs changed files without preserving staging directory metadata', () => {
   assert.doesNotMatch(skill, /Copy staging contents with `sudo cp -a/);
@@ -45,4 +46,19 @@ test('git updater re-executes itself after pulling a script update', () => {
   assert.match(updateScript, /script_changed=false/);
   assert.match(updateScript, /deploy\/update-from-git\.sh\)\n\s+script_changed=true/);
   assert.match(updateScript, /exec bash "\$\{APP_DIR\}\/deploy\/update-from-git\.sh"/);
+});
+
+// 重启后的服务可能需要短暂监听时间，健康检查必须覆盖连接被拒绝的窗口。
+test('git updater retries health checks after restarting the service', () => {
+  assert.match(updateScript, /HEALTH_RETRY_COUNT="\$\{HEALTH_RETRY_COUNT:-10\}"/);
+  assert.match(updateScript, /HEALTH_RETRY_DELAY="\$\{HEALTH_RETRY_DELAY:-1\}"/);
+  assert.match(updateScript, /--retry\s+"\$\{HEALTH_RETRY_COUNT\}"/);
+  assert.match(updateScript, /--retry-delay\s+"\$\{HEALTH_RETRY_DELAY\}"/);
+  assert.match(updateScript, /--retry-connrefused/);
+  assert.match(updateScript, /--retry-max-time\s+30/);
+});
+
+// Nginx 限制的是 multipart 请求体，需为应用层 20 MB 文件上限预留封装开销。
+test('nginx upload limit leaves multipart overhead above the 20 MB app limit', () => {
+  assert.match(nginxConfig, /client_max_body_size\s+22m;/);
 });

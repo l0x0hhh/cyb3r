@@ -13,6 +13,9 @@ KEY_FILE="${KEY_FILE:-${SSH_DIR}/github_deploy}"
 KNOWN_HOSTS="${KNOWN_HOSTS:-${SSH_DIR}/known_hosts}"
 SERVICE_NAME="${SERVICE_NAME:-device-management}"
 HEALTH_BASE_URL="${HEALTH_BASE_URL:-http://127.0.0.1:3000}"
+# Restarted services may need a short window before their HTTP listener accepts connections.
+HEALTH_RETRY_COUNT="${HEALTH_RETRY_COUNT:-10}"
+HEALTH_RETRY_DELAY="${HEALTH_RETRY_DELAY:-1}"
 
 fail() {
   printf '\nERROR: %s\n' "$*" >&2
@@ -177,6 +180,10 @@ systemctl is-active --quiet "${SERVICE_NAME}" || {
 
 for health_path in /borrow /admin; do
   curl --fail --silent --show-error --max-time 15 \
+    --retry "${HEALTH_RETRY_COUNT}" \
+    --retry-delay "${HEALTH_RETRY_DELAY}" \
+    --retry-connrefused \
+    --retry-max-time 30 \
     -o /dev/null "${HEALTH_BASE_URL}${health_path}" \
     || fail "Health check failed: ${HEALTH_BASE_URL}${health_path}"
 done
