@@ -8,6 +8,7 @@
     "dev": "node server.js",
     "dev:frontend": "vite --host 0.0.0.0",
     "build": "vite build",
+    "migrate:images": "node scripts/migrate-image-variants.js",
     "test": "node --test"
   },
   "dependencies": {

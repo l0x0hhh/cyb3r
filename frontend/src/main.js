@@ -1,6 +1,5 @@
 // 图片选区展示：保存标准化比例，让借用卡片和详情页复用同一构图。
 import * as Vue from 'vue';
-import ExcelJS from 'exceljs';
 const { createApp } = Vue;
 
 // 批量工作簿共用同一组中文列定义，避免模板、预览和导出字段漂移。
@@ -39,6 +38,16 @@ const EMAIL_PREVIEW_EVENTS = [
 
 // ==================== 工具函数 ====================
 const API_BASE = '';
+// 上传前先在浏览器拦截超大文件，服务端仍会执行同样的硬限制。
+const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
+
+// Excel 工作簿只在管理员实际使用导入、导出或模板功能时加载，避免进入普通用户首包。
+let excelJsModulePromise = null;
+async function loadExcelJS() {
+  if (!excelJsModulePromise) excelJsModulePromise = import('exceljs');
+  const module = await excelJsModulePromise;
+  return module.default || module;
+}
 
 // 站点运行时长由浏览器本地计算，避免为页脚引入额外后端请求。
 const SITE_LAUNCH_TIMESTAMP = Date.parse('2026-07-21T12:00:00+08:00');
@@ -1566,6 +1575,7 @@ const AdminPage = {
                     <button type="button" class="image-crop-editor__handle" aria-label="调整图片展示高度" @pointerdown.stop.prevent="startCropResize">↕</button>
                   </div>
                   <div class="image-crop-editor__shade image-crop-editor__shade--bottom" :style="cropShadeBottomStyle"></div>
+                  <button type="button" class="image-crop-editor__replace btn btn--ghost btn--xs" @click.stop="triggerUpload">更换图片</button>
                 </div>
                 <div v-else class="upload-placeholder">
                   <span class="upload-icon">📷</span>
@@ -2187,7 +2197,7 @@ const AdminPage = {
       return parts.length === 3 ? `${parts[1]}/${parts[2]}` : date;
     }
 
-    // 工作簿下载统一使用浏览器 Blob，文件内容由 ExcelJS 生成而不是伪装成 XLSX 的 CSV。
+    // 工作簿下载统一使用浏览器 Blob，ExcelJS 仅在管理员触发工作簿功能时加载。
     async function downloadWorkbook(workbook, filename) {
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -2212,6 +2222,7 @@ const AdminPage = {
     }
 
     async function downloadDeviceImportTemplate() {
+      const ExcelJS = await loadExcelJS();
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet('设备导入模板');
       worksheet.columns = DEVICE_IMPORT_COLUMNS.map(column => ({ header: column.header, key: column.key, width: column.width }));
@@ -2270,6 +2281,7 @@ const AdminPage = {
         return;
       }
       try {
+        const ExcelJS = await loadExcelJS();
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.load(await file.arrayBuffer());
         const worksheet = workbook.worksheets[0];
@@ -2322,6 +2334,7 @@ const AdminPage = {
 
     async function exportDevices() {
       const categoryMap = new Map(categories.value.map(category => [category.id, category.name]));
+      const ExcelJS = await loadExcelJS();
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet('设备列表');
       worksheet.columns = [
@@ -2607,11 +2620,17 @@ const AdminPage = {
       cropDrag.mode = '';
     }
 
+    // 图片选择先在客户端拒绝超过服务端上限的文件，避免上传后才收到失败响应。
     function onImageChange(e) {
       const file = e.target.files[0];
       if (!file) return;
       if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
         alert('仅支持 JPEG、PNG 和 WebP 图片');
+        e.target.value = '';
+        return;
+      }
+      if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
+        alert('图片不能超过 20 MB');
         e.target.value = '';
         return;
       }

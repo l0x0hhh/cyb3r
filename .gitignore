@@ -25,6 +25,7 @@ miniprogram/.git/
 .deploy-staging-*/
 .vite-*/
 .sync/
+.image-migration-test-*
 *.log
 
 # Local archive artifacts.
