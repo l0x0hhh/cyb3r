@@ -77,7 +77,6 @@ flowchart TD
 ├─ frontend/
 │  ├─ index.html                     # HTML 入口和全部全局 CSS
 │  ├─ src/main.js                    # BorrowPage、AdminPage、根应用
-│  ├─ public/fonts/                  # 当前未接入 Vite publicDir 的本地字体副本
 │  └─ dist/                          # 构建产物，禁止手工修改
 ├─ miniprogram/                      # 原生微信小程序普通用户端（独立导入开发者工具）
 │  ├─ config.js                       # AppID 与生产 API 基地址，不含 AppSecret
@@ -86,6 +85,7 @@ flowchart TD
 │  └─ pages/                          # borrow、detail、borrow-form、return 四个页面
 ├─ public/
 │  ├─ assets/                        # 院徽、favicon 等源码静态资源
+│  ├─ fonts/                         # Noto Sans SC 400/700 的本地 WOFF2 子集与许可证
 │  └─ qrcodes/                       # 本地二维码输出，生产为持久化目录
 ├─ data/                             # 本地 JSON 数据，生产为持久化目录
 ├─ uploads/                          # 本地上传图片，生产为持久化目录
@@ -117,7 +117,7 @@ flowchart TD
 
 以下内容不是业务源码：`node_modules/`、`frontend/dist/`、测试截图与浏览器缓存、`.dev-*.log`/`.srv-*.log`、历史同步压缩包。排查功能时不要从这些产物反推源代码。
 
-`vite.config.js` 将 `publicDir` 显式指向项目根目录的 `public/`，不是默认的 `frontend/public/`。当前页面字体来自 Google Fonts，因此不要假定 `frontend/public/fonts/` 会自动进入构建产物。
+`vite.config.js` 将 `publicDir` 显式指向项目根目录的 `public/`，不是默认的 `frontend/public/`。Noto Sans SC 的本地 CSS 和 WOFF2 子集位于 `public/fonts/`，会随 Vite 构建进入 `frontend/dist/fonts/`，页面不再依赖 Google Fonts。
 
 小程序不参与 Vite 构建，也不由 Express 静态页面路由托管。微信开发者工具应直接导入 `miniprogram/`；`project.config.json` 已写入 AppID `wx46f682f7e11b893d`，`config.js` 只保存公开的 `https://cyb3r.art` API 地址。小程序调用现有公开 API，不复制管理员会话，也不应把 AppSecret 放进目录。
 

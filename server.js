@@ -132,15 +132,12 @@ const cspDirectives = {
   defaultSrc: ["'self'"],
   // 当前前端仍使用运行时模板；迁移到 .vue 单文件组件后可移除 unsafe-eval。
   scriptSrc: ["'self'", "'unsafe-eval'"],
-  // Google Fonts supplies the stylesheet from fonts.googleapis.com and the
-  // font files themselves from fonts.gstatic.com; both origins need separate
-  // CSP allowlists.
-  styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-  styleSrcElem: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+  styleSrc: ["'self'", "'unsafe-inline'"],
+  styleSrcElem: ["'self'", "'unsafe-inline'"],
   imgSrc: ["'self'", 'data:', 'blob:'],
   // 网页底栏每次装载仅连接一言官方语句接口一次。
   connectSrc: ["'self'", 'https://v1.hitokoto.cn'],
-  fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+  fontSrc: ["'self'"],
   objectSrc: ["'none'"],
   baseUri: ["'self'"],
   formAction: ["'self'"]

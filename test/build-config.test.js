@@ -6,6 +6,8 @@ const path = require('node:path');
 const projectRoot = path.resolve(__dirname, '..');
 const packageJson = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
 const indexHtml = fs.readFileSync(path.join(projectRoot, 'frontend/index.html'), 'utf8');
+// 本地字体清单和 WOFF2 子集必须完整、可离线访问，并且不再依赖 Google Fonts。
+const localFontCss = fs.readFileSync(path.join(projectRoot, 'public/fonts/noto-sans-sc.css'), 'utf8');
 const serverSource = fs.readFileSync(path.join(projectRoot, 'server.js'), 'utf8');
 const viteSource = fs.readFileSync(path.join(projectRoot, 'vite.config.js'), 'utf8');
 
@@ -123,12 +125,24 @@ test('Vite uses the frontend root default entry across operating systems', () =>
   assert.doesNotMatch(viteSource, /input:\s*resolve\([^\n]*frontend\/index\.html/);
 });
 
-test('document loads Noto Sans SC from Google Fonts CDN with preconnect', () => {
-  assert.match(indexHtml, /fonts\.googleapis\.com/);
+test('document loads Noto Sans SC from local subsets without Google Fonts CDN', () => {
+  assert.match(indexHtml, /href=["']\/fonts\/noto-sans-sc\.css["']/);
   assert.match(indexHtml, /Noto Sans SC/);
-  assert.match(indexHtml, /preconnect/);
+  assert.doesNotMatch(indexHtml, /fonts\.googleapis\.com/);
+  assert.doesNotMatch(indexHtml, /fonts\.gstatic\.com/);
+  assert.doesNotMatch(localFontCss, /https?:\/\//);
+  assert.equal((localFontCss.match(/@font-face/g) || []).length, 202);
+
+  const fontFiles = [...localFontCss.matchAll(/url\(([^)]+\.woff2)\)/g)].map((match) => match[1]);
+  assert.equal(new Set(fontFiles).size, 101);
+  for (const fontFile of new Set(fontFiles)) {
+    assert.equal(fs.existsSync(path.join(projectRoot, 'public/fonts', fontFile)), true, fontFile);
+  }
 });
 
-test('server publishes Content-Security-Policy font-src allowing fonts.gstatic.com', () => {
+test('server publishes a self-hosted Content-Security-Policy font source', () => {
   assert.match(serverSource, /fontSrc/);
+  assert.match(serverSource, /fontSrc:\s*\["'self'"\]/);
+  assert.doesNotMatch(serverSource, /fonts\.gstatic\.com/);
+  assert.doesNotMatch(serverSource, /fonts\.googleapis\.com/);
 });

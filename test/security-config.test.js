@@ -36,10 +36,12 @@ test('public deployment enables security headers, login throttling, and expiring
   assert.match(packageJson.dependencies['express-rate-limit'] || '', /^\d+\.\d+\.\d+$/);
 });
 
-test('Content-Security-Policy permits the Google Fonts stylesheet and font files', () => {
-  assert.match(serverSource, /styleSrc:\s*\[[^\]]*https:\/\/fonts\.googleapis\.com/);
-  assert.match(serverSource, /styleSrcElem:\s*\[[^\]]*https:\/\/fonts\.googleapis\.com/);
-  assert.match(serverSource, /fontSrc:\s*\[[^\]]*https:\/\/fonts\.gstatic\.com/);
+test('Content-Security-Policy keeps self-hosted styles and fonts local', () => {
+  assert.match(serverSource, /styleSrc:\s*\["'self'",\s*"'unsafe-inline'"\]/);
+  assert.match(serverSource, /styleSrcElem:\s*\["'self'",\s*"'unsafe-inline'"\]/);
+  assert.match(serverSource, /fontSrc:\s*\["'self'"\]/);
+  assert.doesNotMatch(serverSource, /fonts\.googleapis\.com/);
+  assert.doesNotMatch(serverSource, /fonts\.gstatic\.com/);
 });
 
 // 一言仅允许从官方语句接口发起浏览器连接，不扩大其他 CSP 来源。

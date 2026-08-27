@@ -642,10 +642,12 @@ test('administrator device batch import and export uses an XLSX preview workflow
   assert.match(source, />导出设备</);
 });
 
-test('document loads Noto Sans SC from Google Fonts CDN', () => {
+test('document loads Noto Sans SC from the local stylesheet', () => {
   const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
-  assert.match(document, /fonts\.googleapis\.com/);
+  assert.match(document, /\/fonts\/noto-sans-sc\.css/);
   assert.match(document, /Noto Sans SC/);
+  assert.doesNotMatch(document, /fonts\.googleapis\.com/);
+  assert.doesNotMatch(document, /fonts\.gstatic\.com/);
 });
 
 test('document includes prefers-reduced-motion override', () => {
