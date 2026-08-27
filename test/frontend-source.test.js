@@ -662,6 +662,15 @@ test('sticky navigation uses a translucent glass treatment on both portals', () 
   assert.match(document, /\.admin-nav\s*\{[^}]*backdrop-filter:\s*blur\(/s);
 });
 
+// 管理端 AppBar 满宽铺开，用户端借还分段控制器保持现有内边距不变。
+test('admin AppBar uses a full-bleed layout without changing user tabs', () => {
+  const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
+  assert.match(document, /\.admin-page\s*\{[^}]*overflow-x:\s*(?:clip|hidden)/s);
+  assert.match(document, /\.admin-nav\s*\{[^}]*width:\s*calc\(100%\s*\+\s*36px\)[^}]*margin-inline:\s*-18px[^}]*padding:\s*18px/s);
+  assert.match(document, /@media\s*\(max-width:\s*700px\)[\s\S]*?\.admin-nav\s*\{[^}]*width:\s*calc\(100%\s*\+\s*24px\)[^}]*margin-inline:\s*-12px[^}]*padding:\s*12px/s);
+  assert.match(document, /\.portal-tabs\s*\{[^}]*padding:\s*8px\s+20px/s);
+});
+
 // 根页面始终预留滚动条槽位，避免在不同高度的管理页面之间切换时横向跳动。
 test('root page reserves a stable scrollbar gutter', () => {
   const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
