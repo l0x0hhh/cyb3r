@@ -103,6 +103,24 @@ test('public and administrator pages identify the JNU Cyber Security School', ()
   assert.match(document, /<title>暨南大学网络空间安全学院 · 设备管理系统<\/title>/);
 });
 
+// ICP备案号与运行时长合并为底栏元信息行，备案号仍链接到工信部备案官网。
+test('public and administrator footers expose the service ICP filing number', () => {
+  const filingMeta = source.match(/class="page-footer__meta"/g) || [];
+  const filingLinks = source.match(/href="https:\/\/beian\.miit\.gov\.cn\/"/g) || [];
+  const filingSeparators = source.match(/class="page-footer__meta-separator"/g) || [];
+  assert.equal(filingMeta.length, 2);
+  assert.equal(filingLinks.length, 2);
+  assert.equal(filingSeparators.length, 2);
+  assert.equal((source.match(/豫ICP备2026040615号-1/g) || []).length, 2);
+  assert.match(source, /page-footer__filing-link[\s\S]*?page-footer__meta-separator[\s\S]*?page-footer__runtime/);
+  assert.doesNotMatch(source, /class="page-footer__filing"/);
+
+  assert.match(documentSource, /\.page-footer__meta\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/s);
+  assert.match(documentSource, /\.page-footer__meta-separator\s*\{/);
+  assert.match(documentSource, /\.page-footer__filing-link\s*\{/);
+  assert.match(documentSource, /page-footer__filing-link:hover[\s\S]*?page-footer__filing-link:focus-visible/);
+});
+
 test('college emblem is placed in the public header, administrator navigation and login card', () => {
   assert.match(borrowPageSource, /class="portal-emblem"[^>]*src="\/assets\/jnu-cyber-security-emblem\.png"[^>]*width="52"[^>]*height="52"/);
   assert.match(source, /class="nav-emblem"[^>]*src="\/assets\/jnu-cyber-security-emblem\.png"[^>]*width="38"[^>]*height="38"/);
@@ -132,6 +150,19 @@ test('unified portal exposes borrow and return navigation and preserves old devi
   assert.match(borrowPageSource, /还设备/);
   assert.match(borrowPageSource, /new URLSearchParams\(window\.location\.search\)\.get\('id'\)/);
   assert.match(borrowPageSource, /history\.pushState/);
+});
+
+// 瀑布流使用显式响应式列，避免列高平衡把少量设备全部推到第一列。
+test('portal waterfall distributes devices across responsive columns', () => {
+  assert.match(source, /const waterfallColumnCount = Vue\.ref\(getWaterfallColumnCount\(\)\)/);
+  assert.match(source, /const deviceColumns = Vue\.computed\(\(\) =>/);
+  assert.match(source, /columnIndex = index % columnCount/);
+  assert.match(source, /class="portal-device-list__column"/);
+  assert.match(source, /v-for="column in deviceColumns"/);
+
+  assert.match(documentSource, /\.portal-device-list--waterfall\s*\{[^}]*display:\s*flex/s);
+  assert.match(documentSource, /\.portal-device-list__column\s*\{[^}]*display:\s*flex/s);
+  assert.doesNotMatch(documentSource, /\.portal-device-list--waterfall\s*\{[^}]*column-count:/s);
 });
 
 test('borrow page renders the public device image with a fallback', () => {
@@ -167,25 +198,25 @@ test('images use a fixed-color blurred fade-in placeholder without shimmer', () 
 test('available devices render as a responsive waterfall using optimized thumbnails', () => {
   assert.match(borrowPageSource, /portal-page--feed/);
   assert.match(borrowPageSource, /portal-device-list--waterfall/);
-  assert.match(borrowPageSource, /item\.imageThumb \|\| item\.image/);
-  assert.match(borrowPageSource, /imageAspectRatio\(item\)/);
-  assert.match(borrowPageSource, /markImageLoaded\(item\.imageThumb \|\| item\.image, \$event\)/);
+  assert.match(borrowPageSource, /entry\.item\.imageThumb \|\| entry\.item\.image/);
+  assert.match(borrowPageSource, /imageDisplayAspectRatio\(entry\.item\)/);
+  assert.match(borrowPageSource, /markImageLoaded\(entry\.item\.imageThumb \|\| entry\.item\.image, \$event\)/);
   assert.match(borrowPageSource, /imageRatios/);
   assert.match(borrowPageSource, /naturalWidth/);
-  assert.match(borrowPageSource, /index < 2 \? 'eager' : 'lazy'/);
+  assert.match(borrowPageSource, /entry\.index < 2 \? 'eager' : 'lazy'/);
 
   const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
-  assert.match(document, /\.portal-device-list--waterfall\s*\{[^}]*column-count:\s*4/s);
-  assert.match(document, /column-count:\s*3/);
-  assert.match(document, /column-count:\s*2/);
-  assert.match(document, /break-inside:\s*avoid/);
+  assert.match(document, /\.portal-device-list--waterfall\s*\{[^}]*display:\s*flex/s);
+  assert.match(document, /\.portal-device-list__column\s*\{[^}]*flex-direction:\s*column/s);
+  assert.doesNotMatch(document, /\.portal-device-list--waterfall\s*\{[^}]*column-count:/s);
+  assert.doesNotMatch(document, /break-inside:\s*avoid/);
 });
 
 test('available device cards apply the saved display aspect ratio and vertical position', () => {
-  assert.match(borrowPageSource, /imageDisplayAspectRatio\(item\)/);
-  assert.match(borrowPageSource, /imageDisplayPositionY\(item\)/);
-  assert.match(borrowPageSource, /aspectRatio:\s*imageDisplayAspectRatio\(item\)/);
-  assert.match(borrowPageSource, /objectPosition:\s*'50% '\s*\+\s*imageDisplayPositionY\(item\)\s*\+\s*'%'/);
+  assert.match(borrowPageSource, /imageDisplayAspectRatio\(entry\.item\)/);
+  assert.match(borrowPageSource, /imageDisplayPositionY\(entry\.item\)/);
+  assert.match(borrowPageSource, /aspectRatio:\s*imageDisplayAspectRatio\(entry\.item\)/);
+  assert.match(borrowPageSource, /objectPosition:\s*'50% '\s*\+\s*imageDisplayPositionY\(entry\.item\)\s*\+\s*'%'/);
 });
 
 test('portal count follows the filtered device list and animates count changes', () => {
@@ -664,13 +695,15 @@ test('sticky navigation uses a translucent glass treatment on both portals', () 
   assert.match(document, /\.admin-nav\s*\{[^}]*backdrop-filter:\s*blur\(/s);
 });
 
-// 管理端 AppBar 满宽铺开，用户端借还分段控制器保持现有内边距不变。
-test('admin AppBar uses a full-bleed layout without changing user tabs', () => {
+// 管理端与用户端顶部入口都使用宽版容器，内容区仍保留可读宽度。
+test('admin AppBar and user portal tabs use stable full-width containers', () => {
   const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
   assert.match(document, /\.admin-page\s*\{[^}]*overflow-x:\s*(?:clip|hidden)/s);
   assert.match(document, /\.admin-nav\s*\{[^}]*width:\s*calc\(100%\s*\+\s*36px\)[^}]*margin-inline:\s*-18px[^}]*padding:\s*18px/s);
   assert.match(document, /@media\s*\(max-width:\s*700px\)[\s\S]*?\.admin-nav\s*\{[^}]*width:\s*calc\(100%\s*\+\s*24px\)[^}]*margin-inline:\s*-12px[^}]*padding:\s*12px/s);
-  assert.match(document, /\.portal-tabs\s*\{[^}]*padding:\s*8px\s+20px/s);
+  assert.match(document, /\.portal-page\s*\{[^}]*max-width:\s*1180px/s);
+  assert.match(document, /\.portal-page:not\(\.portal-page--feed\)\s+\.portal-main\s*\{[^}]*max-width:\s*720px[^}]*margin-inline:\s*auto/s);
+  assert.match(document, /\.portal-tabs\s*\{[^}]*width:\s*100%[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)[^}]*padding:\s*8px\s+20px/s);
 });
 
 // 根页面始终预留滚动条槽位，避免在不同高度的管理页面之间切换时横向跳动。

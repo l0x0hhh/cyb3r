@@ -162,6 +162,13 @@ async function apiCall(method, url, body) {
   return res.json();
 }
 
+// 瀑布流列数与页面断点保持一致，避免 CSS 多列自动平衡造成空列。
+function getWaterfallColumnCount() {
+  if (window.matchMedia?.('(max-width: 700px)').matches) return 2;
+  if (window.matchMedia?.('(max-width: 960px)').matches) return 3;
+  return 4;
+}
+
 // 全局样式已迁移到 index.html，此处不再注入
 
 // ==================== 统一借还门户 ====================
@@ -262,20 +269,23 @@ const BorrowPage = {
                 <p>设备可能正在使用或维修中，请稍后再来看看。</p>
               </div>
               <div v-else class="portal-device-list portal-device-list--waterfall">
-                <article v-for="(item, index) in filteredDevices" :key="item.id" class="portal-device-row" :class="'portal-device-row--' + categoryColorClass(item.category)" :style="{ '--card-index': index }">
-                  <a :href="'/borrow?id=' + item.id" :data-device-id="item.id" role="button" @click.prevent="openDevice(item.id)" class="portal-device-row__link">
-                    <span class="portal-device-row__media" :style="{ aspectRatio: imageDisplayAspectRatio(item) }">
-                      <img v-if="hasImage(item, item.imageThumb || item.image)" :src="item.imageThumb || item.image" :alt="item.name" :width="item.imageWidth || undefined" :height="item.imageHeight || undefined" class="portal-media-image" :class="{ 'is-loaded': isImageLoaded(item.imageThumb || item.image) }" :style="{ objectPosition: '50% ' + imageDisplayPositionY(item) + '%' }" :loading="index < 2 ? 'eager' : 'lazy'" :fetchpriority="index < 2 ? 'high' : 'auto'" decoding="async" @load="markImageLoaded(item.imageThumb || item.image, $event)" @error="markImageFailed(item.imageThumb || item.image)" />
-                      <span v-else class="portal-image-placeholder portal-image-placeholder--small">暂无图片</span>
-                    </span>
-                    <span class="portal-device-row__content">
-                      <span class="portal-device-row__icon" v-html="categoryIcon(item.category)"></span>
-                      <strong>{{ item.name }}</strong>
-                      <span>{{ item.model }}</span>
-                      <small>{{ item.location || '位置未填写' }}</small>
-                    </span>
-                  </a>
-                </article>
+                <!-- 按响应式列数轮流分配设备，保证前两台在移动端分别进入左右列。 -->
+                <div v-for="column in deviceColumns" :key="'device-column-' + column.id" class="portal-device-list__column">
+                  <article v-for="entry in column.items" :key="entry.item.id" class="portal-device-row" :class="'portal-device-row--' + categoryColorClass(entry.item.category)" :style="{ '--card-index': entry.index }">
+                    <a :href="'/borrow?id=' + entry.item.id" :data-device-id="entry.item.id" role="button" @click.prevent="openDevice(entry.item.id)" class="portal-device-row__link">
+                      <span class="portal-device-row__media" :style="{ aspectRatio: imageDisplayAspectRatio(entry.item) }">
+                        <img v-if="hasImage(entry.item, entry.item.imageThumb || entry.item.image)" :src="entry.item.imageThumb || entry.item.image" :alt="entry.item.name" :width="entry.item.imageWidth || undefined" :height="entry.item.imageHeight || undefined" class="portal-media-image" :class="{ 'is-loaded': isImageLoaded(entry.item.imageThumb || entry.item.image) }" :style="{ objectPosition: '50% ' + imageDisplayPositionY(entry.item) + '%' }" :loading="entry.index < 2 ? 'eager' : 'lazy'" :fetchpriority="entry.index < 2 ? 'high' : 'auto'" decoding="async" @load="markImageLoaded(entry.item.imageThumb || entry.item.image, $event)" @error="markImageFailed(entry.item.imageThumb || entry.item.image)" />
+                        <span v-else class="portal-image-placeholder portal-image-placeholder--small">暂无图片</span>
+                      </span>
+                      <span class="portal-device-row__content">
+                        <span class="portal-device-row__icon" v-html="categoryIcon(entry.item.category)"></span>
+                        <strong>{{ entry.item.name }}</strong>
+                        <span>{{ entry.item.model }}</span>
+                        <small>{{ entry.item.location || '位置未填写' }}</small>
+                      </span>
+                    </a>
+                  </article>
+                </div>
               </div>
             </div>
         </section>
@@ -370,7 +380,12 @@ const BorrowPage = {
         <div class="page-footer__hitokoto">
           <a class="page-footer__hitokoto-link" :href="hitokotoUrl || null" target="_blank" rel="noopener noreferrer" :aria-label="hitokotoText">{{ hitokotoText }}<span v-if="isHitokotoTyping" class="page-footer__hitokoto-cursor" aria-hidden="true"></span></a>
         </div>
-        <div class="page-footer__runtime">{{ siteRuntime }}</div>
+        <!-- 备案号与运行时长合并为一行底栏元信息，减少页脚视觉占用。 -->
+        <div class="page-footer__meta">
+          <a class="page-footer__filing-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">豫ICP备2026040615号-1</a>
+          <span class="page-footer__meta-separator" aria-hidden="true">·</span>
+          <span class="page-footer__runtime">{{ siteRuntime }}</span>
+        </div>
       </footer>
     </div>
   `,
@@ -394,6 +409,23 @@ const BorrowPage = {
         list = list.filter(d => (d.category || 'cat-other') === activeCategory.value);
       }
       return list;
+    });
+    // 按顺序轮流分配到响应式列，少量设备也能横向填充瀑布流。
+    const waterfallColumnCount = Vue.ref(getWaterfallColumnCount());
+    const updateWaterfallColumnCount = () => {
+      const nextColumnCount = getWaterfallColumnCount();
+      if (nextColumnCount !== waterfallColumnCount.value) waterfallColumnCount.value = nextColumnCount;
+    };
+    const deviceColumns = Vue.computed(() => {
+      const devices = filteredDevices.value;
+      if (!devices.length) return [];
+      const columnCount = Math.min(waterfallColumnCount.value, devices.length);
+      const columns = Array.from({ length: columnCount }, (_, id) => ({ id, items: [] }));
+      devices.forEach((item, index) => {
+        const columnIndex = index % columnCount;
+        columns[columnIndex].items.push({ item, index });
+      });
+      return columns;
     });
     function categoryIcon(icon) {
       const svgs = {
@@ -702,14 +734,16 @@ const BorrowPage = {
         loadDevice(selectedDeviceId.value);
       }
       window.addEventListener('popstate', handlePopState);
+      window.addEventListener('resize', updateWaterfallColumnCount);
       apiCall('GET', '/api/categories').then(res => { if (res.success) categories.value = res.data; });
     });
     Vue.onBeforeUnmount(() => {
       window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('resize', updateWaterfallColumnCount);
     });
 
     return {
-      activeMode, availableDevices, filteredDevices, searchQuery, activeCategory, categories, loadingDevices, selectedDeviceId, device, currentBorrower,
+      activeMode, availableDevices, filteredDevices, deviceColumns, searchQuery, activeCategory, categories, loadingDevices, selectedDeviceId, device, currentBorrower,
       detailLoading, noDevice, showBorrowForm, submitting, returningRecordId, returnSearched,
       returnResults, returnToken, returnNotes, form, returnLookup, hasImage, markImageFailed,
       markImageLoaded, isImageLoaded, imageAspectRatio, imageDisplayAspectRatio, imageDisplayPositionY, buildSrcset, detailImageHeight, detailImageAspectRatio, detailMediaStyle,
@@ -1601,7 +1635,12 @@ const AdminPage = {
           <div class="page-footer__hitokoto">
             <a class="page-footer__hitokoto-link" :href="hitokotoUrl || null" target="_blank" rel="noopener noreferrer" :aria-label="hitokotoText">{{ hitokotoText }}<span v-if="isHitokotoTyping" class="page-footer__hitokoto-cursor" aria-hidden="true"></span></a>
           </div>
-          <div class="page-footer__runtime">{{ siteRuntime }}</div>
+          <!-- 管理端与用户端共用同一底栏元信息层级，保持入口体验一致。 -->
+          <div class="page-footer__meta">
+            <a class="page-footer__filing-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">豫ICP备2026040615号-1</a>
+            <span class="page-footer__meta-separator" aria-hidden="true">·</span>
+            <span class="page-footer__runtime">{{ siteRuntime }}</span>
+          </div>
         </footer>
       </div>
     </div>
