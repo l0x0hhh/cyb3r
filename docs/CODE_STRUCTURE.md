@@ -329,7 +329,7 @@ flowchart TD
 | `data/records.json` | 借用、归还、记录管理 | 借用人信息、用途、归还与归档时间 | 含敏感信息，不写入文档示例 |
 | `data/categories.json` | 分类 CRUD 与批量重排 | 分类 ID、名称、历史兼容图标、排序 | `cat-other` 是不可删除但可排序的回退项 |
 | `data/operation-logs.json` | 管理员成功动作 | 脱敏设备操作日志 | 生产文件不在代码目录 |
-| `data/email-settings.json` | 管理员邮件设置 | SMTP、通知开关、接收邮箱、模板和加密凭据 | 生产文件不上传；凭据由 `EMAIL_CONFIG_KEY` 加密 |
+| `data/email-settings.json` | 管理员邮件设置 | SMTP、通知开关、接收邮箱、三类事件独立模板（`templates.borrow/return/adminReturn`）和加密凭据 | 生产文件不上传；凭据由 `EMAIL_CONFIG_KEY` 加密；旧 `subjectTemplate`/`bodyTemplate` 保留作兼容回退并同步为借出模板 |
 | `uploads/` | Multer + Sharp | 随机命名详情图与缩略图 WebP | 生产更新不得覆盖 |
 | `public/qrcodes/` | QRCode | 统一入口和单设备二维码 PNG | 生产更新不得覆盖 |
 
