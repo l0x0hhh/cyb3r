@@ -172,6 +172,24 @@ test('borrow page renders the public device image with a fallback', () => {
   assert.match(borrowPageSource, /markImageFailed/);
 });
 
+// PC 详情恢复普通文档流，返回时不做向上离场并恢复进入前的滚动位置。
+test('desktop portal detail restores the original layout without an upward leave animation', () => {
+  const desktopStyles = documentSource.slice(
+    documentSource.indexOf('@media (min-width: 561px)'),
+    documentSource.indexOf('@media (max-width: 700px)')
+  );
+  assert.match(borrowPageSource, /detailScrollY/);
+  assert.match(borrowPageSource, /detailScrollY\.value = window\.scrollY/);
+  assert.match(borrowPageSource, /window\.scrollTo\(\{ top: savedDetailScrollY/);
+  assert.match(borrowPageSource, /!isMobileDetailLayout\(\)[\s\S]*window\.scrollTo\(\{ top: 0, behavior: 'auto' \}\)/);
+  assert.match(desktopStyles, /\.portal-detail-view\s*\{[^}]*position:\s*static/s);
+  assert.match(desktopStyles, /\.portal-device-list-view--covered\s*\{[^}]*display:\s*none/s);
+  assert.match(borrowPageSource, /'portal-page--feed':\s*activeMode === 'borrow'\s*,/);
+  assert.match(desktopStyles, /\.portal-detail-slide-leave-active\s*\{[^}]*transition:\s*none/s);
+  assert.match(desktopStyles, /\.portal-detail-slide-leave-to\s*\{[^}]*transform:\s*none[^}]*opacity:\s*1/s);
+  assert.doesNotMatch(documentSource, /portal-detail-slide-leave-to\s*\{[^}]*translateY\(-/);
+});
+
 test('image loading strategy prioritizes the scan page and lazy-loads admin lists', () => {
   assert.match(borrowPageSource, /loading="eager"/);
   assert.match(borrowPageSource, /fetchpriority="high"/);
@@ -370,14 +388,15 @@ test('mobile device detail keeps native document scroll untouched behind a fixed
   assert.match(borrowPageSource, /portal-device-list-view/);
   assert.match(borrowPageSource, /portal-detail-view/);
   assert.doesNotMatch(borrowPageSource, /listScrollY|restoreListScroll|setDetailOpenState/);
-  assert.doesNotMatch(closeDeviceSource + finishCloseDeviceSource, /window\.scrollTo/);
-  assert.match(openDeviceSource, /history\.pushState\(\{\s*portalDeviceId:\s*deviceId\s*\}/);
+  assert.doesNotMatch(closeDeviceSource, /window\.scrollTo/);
+  assert.match(finishCloseDeviceSource, /savedDetailScrollY !== null && !isMobileDetailLayout\(\)[\s\S]*window\.scrollTo/);
+  assert.match(openDeviceSource, /history\.pushState\(\{\s*portalDeviceId:\s*deviceId[\s\S]*\}/);
   assert.match(closeDeviceSource, /history\.state\?\.portalDeviceId\s*===\s*selectedDeviceId\.value[\s\S]*history\.back\(\)/);
   assert.match(closeDeviceSource, /history\.replaceState\(\{\},\s*'',\s*'\/borrow'\)/);
-  assert.match(borrowPageSource, /<transition name="portal-detail-slide" @after-leave="finishCloseDevice">/);
+  assert.match(borrowPageSource, /<transition name="portal-detail-slide" :css="isMobileDetailLayout\(\)" @after-leave="finishCloseDevice">/);
   assert.doesNotMatch(closeDeviceSource, /device\.value\s*=\s*null/);
   assert.match(finishCloseDeviceSource, /focus\(\{\s*preventScroll:\s*true\s*\}\)/);
-  assert.doesNotMatch(finishCloseDeviceSource, /scrollTo|setDetailOpenState/);
+  assert.doesNotMatch(finishCloseDeviceSource, /setDetailOpenState/);
   assert.doesNotMatch(closeDeviceSource, /loadAvailableDevices\(\)/);
   assert.match(document, /@media \(max-width: 560px\)[\s\S]*?\.portal-detail-view\s*\{[^}]*position:\s*fixed[^}]*overflow-y:\s*auto/s);
   // 只检查根元素选择器，避免把文档标签到普通组件 overflow 之间的文本误判为根滚动锁。
@@ -684,6 +703,26 @@ test('document loads Noto Sans SC from the local stylesheet', () => {
 test('document includes prefers-reduced-motion override', () => {
   const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
   assert.match(document, /@media \(prefers-reduced-motion: reduce\)/);
+});
+
+// 点击粒子特效只属于用户端，并保持依赖顺序、交互过滤和卸载清理。
+test('borrow portal loads and isolates the click particle effect', () => {
+  const fireworks = fs.readFileSync(path.resolve(__dirname, '../public/js/fireworks.js'), 'utf8');
+  const anime = fs.readFileSync(path.resolve(__dirname, '../public/js/anime.min.js'), 'utf8');
+  const borrowPageSource = source.slice(source.indexOf('const BorrowPage'), source.indexOf('const AdminPage'));
+
+  assert.ok(anime.length > 1000);
+  assert.match(borrowPageSource, /<canvas class="fireworks" aria-hidden="true"><\/canvas>/);
+  assert.match(borrowPageSource, /loadBorrowFireworks\(canvasEl\)/);
+  assert.match(source, /loadScript\('\/js\/anime\.min\.js'\)[\s\S]*?loadScript\('\/js\/fireworks\.js'\)/);
+  assert.match(fireworks, /window\.initBorrowFireworks/);
+  assert.match(fireworks, /prefers-reduced-motion/);
+  assert.match(fireworks, /pointerdown/);
+  assert.match(fireworks, /a, button, input, textarea, select/);
+  assert.match(fireworks, /removeEventListener\('pointerdown'/);
+  assert.match(fireworks, /pause\(\)/);
+  assert.match(documentSource, /\.fireworks\s*\{[^}]*pointer-events:\s*none[^}]*z-index:\s*90/s);
+  assert.doesNotMatch(source.slice(source.indexOf('const AdminPage')), /class="fireworks"/);
 });
 
 // 约束用户端与管理端吸顶导航保持统一的半透明玻璃层表现。

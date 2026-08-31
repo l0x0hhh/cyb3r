@@ -2,6 +2,32 @@
 import * as Vue from 'vue';
 const { createApp } = Vue;
 
+// 用户端点击特效按需加载，管理员后台不创建 Canvas 也不请求特效脚本。
+function loadBorrowFireworks(canvasEl) {
+  if (!canvasEl) return Promise.resolve(() => {});
+
+  function loadScript(src) {
+    const existing = document.querySelector(`script[data-device-effect="${src}"]`);
+    if (existing) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = false;
+      script.dataset.deviceEffect = src;
+      script.onload = resolve;
+      script.onerror = reject;
+      document.body.appendChild(script);
+    });
+  }
+
+  return loadScript('/js/anime.min.js')
+    .then(() => loadScript('/js/fireworks.js'))
+    .then(() => typeof window.initBorrowFireworks === 'function'
+      ? window.initBorrowFireworks(canvasEl)
+      : () => {})
+    .catch(() => () => {});
+}
+
 // 批量工作簿共用同一组中文列定义，避免模板、预览和导出字段漂移。
 const DEVICE_IMPORT_COLUMNS = [
   { header: '设备名称', key: 'name', required: true, width: 22 },
@@ -174,7 +200,9 @@ function getWaterfallColumnCount() {
 // ==================== 统一借还门户 ====================
 const BorrowPage = {
   template: `
-    <div class="portal-page" :class="{ 'portal-page--feed': activeMode === 'borrow' && !selectedDeviceId, 'portal-page--detail': activeMode === 'borrow' && selectedDeviceId }">
+    <div class="portal-page" :class="{ 'portal-page--feed': activeMode === 'borrow', 'portal-page--detail': activeMode === 'borrow' && selectedDeviceId }">
+      <!-- 借还页面专用点击粒子层，管理后台不渲染此 Canvas。 -->
+      <canvas class="fireworks" aria-hidden="true"></canvas>
       <header class="portal-header">
         <div class="portal-header__inner">
           <div class="portal-brand">
@@ -195,7 +223,8 @@ const BorrowPage = {
       <main class="portal-main">
         <section v-if="activeMode === 'borrow'" class="portal-section">
           <!-- 详情固定覆盖列表，根页面滚动位置始终不变，返回时直接揭示原位置。 -->
-          <transition name="portal-detail-slide" @after-leave="finishCloseDevice">
+          <!-- PC 端直接切换详情节点，移动端保留详情层过渡，避免返回时两套内容叠加。 -->
+          <transition name="portal-detail-slide" :css="isMobileDetailLayout()" @after-leave="finishCloseDevice">
             <div v-if="selectedDeviceId" key="detail" class="portal-detail-view">
               <button class="portal-back" @click="closeDevice"><span aria-hidden="true">←</span> 返回</button>
 
@@ -443,8 +472,9 @@ const BorrowPage = {
     }
     const loadingDevices = Vue.ref(false);
     const selectedDeviceId = Vue.ref(initialDeviceId || '');
-    // 列表始终保留在原生文档流中，详情关闭后只恢复点击焦点。
+    // 列表始终保留在原生文档流中，桌面详情关闭后恢复进入前的滚动位置。
     const lastSelectedDeviceId = Vue.ref('');
+    const detailScrollY = Vue.ref(null);
     const device = Vue.ref(null);
     const currentBorrower = Vue.ref(null);
     const detailLoading = Vue.ref(false);
@@ -583,8 +613,9 @@ const BorrowPage = {
 
     function openDevice(deviceId) {
       lastSelectedDeviceId.value = deviceId;
+      if (!isMobileDetailLayout()) detailScrollY.value = window.scrollY;
       selectedDeviceId.value = deviceId;
-      history.pushState({ portalDeviceId: deviceId }, '', '/borrow?id=' + encodeURIComponent(deviceId));
+      history.pushState({ portalDeviceId: deviceId, portalScrollY: detailScrollY.value }, '', '/borrow?id=' + encodeURIComponent(deviceId));
       loadDevice(deviceId, availableDevices.value.find(item => item.id === deviceId) || null);
       if (!isMobileDetailLayout()) {
         Vue.nextTick(() => window.scrollTo({ top: 0, behavior: 'auto' }));
@@ -601,12 +632,19 @@ const BorrowPage = {
       history.replaceState({}, '', '/borrow');
     }
 
-    // 根页面从未滚动，详情移除后只需清理数据并恢复无滚动副作用的焦点。
+    // 详情退出后先清理状态，再恢复桌面端进入详情前的文档位置。
     function finishCloseDevice() {
+      const savedDetailScrollY = detailScrollY.value;
+      detailScrollY.value = null;
       device.value = null;
       currentBorrower.value = null;
       noDevice.value = false;
       Vue.nextTick(() => {
+        if (savedDetailScrollY !== null && !isMobileDetailLayout()) {
+          window.requestAnimationFrame(() => {
+            window.scrollTo({ top: savedDetailScrollY, behavior: 'auto' });
+          });
+        }
         if (lastSelectedDeviceId.value && window.CSS?.escape) {
           document.querySelector(`[data-device-id="${CSS.escape(lastSelectedDeviceId.value)}"]`)?.focus({ preventScroll: true });
         }
@@ -726,7 +764,16 @@ const BorrowPage = {
       }
     }
 
-    Vue.onMounted(() => {
+    let destroyBorrowFireworks = () => {};
+    let borrowFireworksUnmounted = false;
+    Vue.onMounted(async () => {
+      const canvasEl = document.querySelector('.fireworks');
+      const destroy = await loadBorrowFireworks(canvasEl);
+      if (borrowFireworksUnmounted) {
+        destroy();
+      } else {
+        destroyBorrowFireworks = destroy;
+      }
       // 深链接详情也预载设备列表，返回时无需再次请求和重建瀑布流。
       loadAvailableDevices();
       if (selectedDeviceId.value) {
@@ -738,6 +785,8 @@ const BorrowPage = {
       apiCall('GET', '/api/categories').then(res => { if (res.success) categories.value = res.data; });
     });
     Vue.onBeforeUnmount(() => {
+      borrowFireworksUnmounted = true;
+      destroyBorrowFireworks();
       window.removeEventListener('popstate', handlePopState);
       window.removeEventListener('resize', updateWaterfallColumnCount);
     });
@@ -747,7 +796,7 @@ const BorrowPage = {
       detailLoading, noDevice, showBorrowForm, submitting, returningRecordId, returnSearched,
       returnResults, returnToken, returnNotes, form, returnLookup, hasImage, markImageFailed,
       markImageLoaded, isImageLoaded, imageAspectRatio, imageDisplayAspectRatio, imageDisplayPositionY, buildSrcset, detailImageHeight, detailImageAspectRatio, detailMediaStyle,
-      deviceStatusText, deviceStatusClass, openDevice, closeDevice, finishCloseDevice, switchMode, doBorrow,
+      deviceStatusText, deviceStatusClass, isMobileDetailLayout, openDevice, closeDevice, finishCloseDevice, switchMode, doBorrow,
       lookupReturns, doReturn, formatDate, categoryIcon, categoryColorClass, siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping
     };
   }

@@ -63,6 +63,8 @@
     line-height: 1.5;
   }
   #app { min-height: 100%; }
+  /* 用户端点击粒子层只负责绘制，位于内容上方但低于导航和弹窗，不阻断任何操作。 */
+  .fireworks { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 90; }
   button { cursor: pointer; border: none; font-family: inherit; }
   input, textarea, select { font-family: inherit; }
   a { color: inherit; }
@@ -203,7 +205,7 @@
   .portal-media-image { opacity: 0; filter: blur(15px); transform: scale(1.03); transform-origin: center; transition: opacity .3s ease, filter .6s ease, transform .6s ease; }
   .portal-media-image.is-loaded { opacity: 1; filter: blur(0); transform: scale(1); }
   .portal-back { margin-bottom: 14px; padding: 8px 0; color: var(--ink-soft); background: transparent; font-size: 13px; font-weight: 700; }
-  /* 详情只对自身做短促合成动画，列表不再离场或重建。 */
+  /* 详情沿用原来的普通文档流，列表隐藏但保留占位，返回时不重建页面。 */
   .portal-device-list-view--covered { display: none; }
   .portal-detail-view { min-width: 0; }
   .portal-detail-slide-enter-active,
@@ -701,6 +703,17 @@
     .portal-device-list__column { gap: 14px; }
     .section-header--devices { flex-wrap: wrap; }
     .section-header--devices .device-toolbar__normal { flex-basis: 100%; }
+  }
+
+  @media (min-width: 561px) {
+    /* PC 恢复原来的居中详情卡，取消向上离场，避免返回时闪烁。 */
+    .portal-page--detail .portal-detail-view { width: min(720px, 100%); margin-inline: auto; }
+    .portal-page--detail .portal-detail-slide-leave-active { transition: none; }
+    .portal-page--detail .portal-detail-slide-leave-to { transform: none; opacity: 1; }
+    .portal-page--detail .portal-detail-view {
+      position: static; overflow: visible; padding: 0; background: transparent;
+    }
+    .portal-page--detail .portal-device-list-view--covered { display: none; }
   }
 
   @media (max-width: 700px) {
