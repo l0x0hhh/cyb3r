@@ -4,7 +4,10 @@
 
 ## 新任务从这里开始
 
-- 项目结构、业务规则、接口、数据和部署现状：[`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md)
+- 当前目标、首个待办、验证和部署快照：[`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md)
+- 稳定产品规则、代码地图、任务路由和生产边界：[`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md)
+- 历史变更记录（按需查看）：[`docs/CHANGELOG.md`](docs/CHANGELOG.md)
+- 详细代码定位：[`docs/CODE_STRUCTURE.md`](docs/CODE_STRUCTURE.md)
 - 统一借还门户详细设计：[`docs/plans/2026-07-21-unified-device-portal-design.md`](docs/plans/2026-07-21-unified-device-portal-design.md)
 - Ubuntu 部署脚本：[`deploy/setup-server.sh`](deploy/setup-server.sh)
 
@@ -32,4 +35,4 @@ npm test
 npm run build
 ```
 
-生产数据、上传图片和二维码应使用独立持久化目录，更新项目代码时不要覆盖这些目录。具体路径和更新流程见持续说明书。
+生产数据、上传图片和二维码应使用独立持久化目录，更新项目代码时不要覆盖这些目录。具体路径和更新流程见 [`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md) 与 [`DEPLOY.md`](DEPLOY.md)。

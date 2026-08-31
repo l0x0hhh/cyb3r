@@ -1,6 +1,6 @@
 # 设备管理项目交接卡
 
-> 最后更新：2026-08-28
+> 最后更新：2026-08-31
 > 这是新会话的第一入口；稳定规则见 [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md)，历史变更见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 当前目标
@@ -15,29 +15,25 @@
 
 | 状态面 | 当前结论 | 证据或备注 |
 | --- | --- | --- |
-| 本地已完成 | 上传与首包优化阶段 1、2；管理员分级、导航和权限修复；管理端 AppBar 满宽样式；用户端顶部品牌栏和借还分段控件统一宽版容器；Noto Sans SC 字体本地化；用户端和管理端页脚合并服务备案号与运行时长；公开设备列表改为响应式独立列式瀑布流 | 字体资源位于 `public/fonts/`，入口改为本地 CSS，移除 Google Fonts 远程引用；用户端顶部使用 1180px 宽版容器，归还查询内容保留 720px 可读宽度，两个 tab 自动均分；备案号与运行时长显示为同一元信息行并链接工信部备案官网；瀑布流按手机 2、平板 3、桌面 4 列分配 |
-| 本地已验证 | AppBar 定向契约 1/1；两个入口语法检查；独立测试端口完整 `npm test` 151/151；备案号定向契约 69/69；瀑布流定向契约 70/70；用户端顶部宽版布局定向契约；字体资源引用完整性检查；Vite 构建通过 | 构建仅保留既有大体积 chunk 提示；用户端顶部宽版布局、页脚合并版和瀑布流布局等待用户桌面端和 390px 移动端浏览器确认 |
-| 已同步服务器 | 生产源码及部署脚本已同步；服务器当前跟踪 `main`，最近确认提交 `3580237` | 生产服务已重启，WebP 迁移和 Nginx `22m` 已完成 |
-| 生产已验证 | 服务、普通管理员权限隔离、一言、WebP 图片加载和 Nginx 配置已由用户确认 | AppBar 满宽、备案号页脚、瀑布流布局和三套邮件模板尚未完成本轮生产同步/验证 |
+| 本地已完成 | 上传与首包优化阶段 1、2；管理员分级、导航和权限修复；管理端 AppBar 满宽样式；用户端顶部品牌栏和借还分段控件统一宽版容器；Noto Sans SC 字体本地化；用户端和管理端页脚合并服务备案号与运行时长；公开设备列表改为响应式独立列式瀑布流；用户端点击粒子特效；PC 端详情页返回体验（返回取消向上收回动效并恢复列表滚动位置） | 字体资源位于 `public/fonts/`，入口改为本地 CSS，移除 Google Fonts 远程引用；用户端顶部使用 1180px 宽版容器，归还查询内容保留 720px 可读宽度，两个 tab 自动均分；备案号与运行时长显示为同一元信息行并链接工信部备案官网；瀑布流按手机 2、平板 3、桌面 4 列分配；粒子特效仅在 `/borrow` 创建 Canvas 并按需加载脚本，`/admin` 不加载 |
+| 本地已验证 | AppBar 定向契约 1/1；两个入口语法检查；完整 `npm test` 153/153；点击粒子特效定向契约 1/1；`node --check server.js` 与前端入口通过；标准 `npm run build` 通过（EPERM 阻塞已解除） | 构建仅保留既有大体积 chunk 提示；PC 端详情返回契约测试通过；点击粒子特效和 PC 端详情返回均尚待用户浏览器确认后同步 |
+| 已同步服务器 | 生产源码已同步到 `b7c2beb`；服务器当前跟踪 `main`；该提交包含 AppBar 满宽、Noto Sans SC 字体、备案号页脚、设备瀑布流和用户端顶部宽版布局 | 更新脚本输出 `Deployment completed at b7c2bebacfe40112b1a64f42edf642686201ba8a`；本轮点击粒子特效与 PC 端详情返回改动均尚未同步服务器 |
+| 生产已验证 | 服务、普通管理员权限隔离、一言、WebP 图片加载和 Nginx 配置已由用户确认；`b7c2beb` 中的 AppBar 满宽、Noto Sans SC 字体、备案号页脚、设备瀑布流和用户端顶部宽版布局已完成生产视觉确认 | 当前仅点击粒子特效尚未同步生产，不能把本地特效验证推断为生产验证 |
 
 ## 活跃事项
 
-1. **AppBar 满宽**：本地已改并有 1/1 契约测试；尚未同步服务器，等待桌面端和 390px 移动端浏览器确认。
-2. **Noto Sans SC 本地化**：本地资源、CSP 和构建验证已完成；尚未同步服务器，需确认生产页面不再请求 `fonts.googleapis.com` 或 `fonts.gstatic.com`。
-3. **邮件模板独立化**：当前仍使用共享模板；这是第一待办，需保持旧数据可读和未提交字段沿用当前配置。
-4. **备案号页脚**：正式服务备案号 `豫ICP备2026040615号-1` 已与运行时长合并为用户端和管理端的一行元信息；自动化检查已通过，等待用户本地人工验收；尚未同步服务器。
-5. **设备瀑布流**：已修正公开设备列表的列式布局，避免两台设备因 CSS 多列平衡落在同一列；尚未完成本轮人工浏览器验收和服务器同步。
-6. **用户端顶部宽版布局**：品牌栏和“借设备 / 还设备”分段控件已与借设备页面统一宽度；归还查询表单仍限宽；等待用户本地浏览器验收，尚未同步服务器。
+1. **邮件模板独立化**：当前仍使用共享模板；这是第一待办，需保持旧数据可读和未提交字段沿用当前配置。
+2. **用户端点击粒子特效**：仅 `/borrow` 按需加载 Anime.js 和 Canvas 粒子脚本；按钮、表单控件、链接、弹窗点击会过滤；尚未同步服务器，等待本地浏览器验收。
+3. **PC 端详情页返回**：返回详情时取消向上收回离场动效并恢复进入前的列表滚动位置；用户确认已实现，工作区含未提交改动；尚未同步服务器，等待浏览器验收。
 
 ## 已知阻塞与边界
 
-- 当前本机标准 `npm run build` 可能因既有 `frontend/dist/assets` ACL 报 `EPERM`；可使用临时输出目录验证，不能借此覆盖现有构建产物。
 - 浏览器桌面端、390px 移动端、真实 SMTP 收件和复杂管理操作由用户手动验收；Agent 不启动 Playwright、下载浏览器或安装额外依赖。
 - 生产持久化数据位于服务器 `/var/lib/device-management`；更新不得覆盖 `data/`、`uploads/`、`public/qrcodes/`、`frontend/dist/` 或 `node_modules/`。
 
 ## 本轮涉及文件
 
-- 已改：`server.js`、`frontend/index.html`、`frontend/src/main.js`、`public/fonts/`、`test/build-config.test.js`、`test/frontend-source.test.js`、`test/security-config.test.js`、`docs/CURRENT_STATUS.md`、`docs/PROJECT_GUIDE.md`、`docs/CODE_STRUCTURE.md`、`docs/CHANGELOG.md`
+- 已改：`server.js`、`frontend/index.html`、`frontend/src/main.js`、`public/fonts/`、`public/js/anime.min.js`、`public/js/fireworks.js`、`test/build-config.test.js`、`test/frontend-source.test.js`、`test/security-config.test.js`、`docs/CURRENT_STATUS.md`、`docs/PROJECT_GUIDE.md`、`docs/CODE_STRUCTURE.md`、`docs/CHANGELOG.md`
 - 未改：生产数据和部署脚本
 
 ## 新会话接续

@@ -36,11 +36,7 @@ sudo mkdir -p /var/lib/device-management/uploads
 sudo mkdir -p /var/lib/device-management/qrcodes
 ```
 
-把源码上传到 `/opt/device-management`。首次部署可以上传源码，但不要上传或覆盖本地 `data/`、`uploads/`、`public/qrcodes/`、`frontend/dist/` 和 `node_modules/`；增量更新必须按 [`skills/sync-device-management/SKILL.md`](skills/sync-device-management/SKILL.md) 逐文件同步。
-
-```bash
-scp -r . root@你的服务器IP:/opt/device-management/
-```
+首次接入已有 GitHub 仓库时，请按第 8 节“首次接入现有生产源码”的流程备份旧目录后执行 Git 克隆。不要使用 `scp -r .` 上传整个项目：`scp` 不读取 `.gitignore`，可能把本地 `data/`、`uploads/`、`public/qrcodes/`、`frontend/dist/`、`node_modules/` 以及其他敏感文件上传到服务器。无法使用 GitHub 时，也必须在临时目录中按文件白名单逐项上传；增量更新必须按 [`skills/sync-device-management/SKILL.md`](skills/sync-device-management/SKILL.md) 逐文件同步。
 
 上传完成后，在服务器执行：
 
@@ -223,6 +219,6 @@ sudo tar -czf /root/device-management-$(date +%F-%H%M).tar.gz /var/lib/device-ma
 - Nginx 显示 502：检查应用是否监听 3000，以及 `systemctl status device-management`。
 - 二维码还是旧域名：确认 `APP_BASE_URL`，重启服务后在后台重新生成二维码。
 - 测试邮件发送失败：确认 `EMAIL_CONFIG_KEY` 未变更、后台 SMTP 主机/端口/加密方式与邮箱服务商要求一致，并查看 `sudo journalctl -u device-management -n 100`；QQ、163 等服务通常要求填写授权码而不是网页登录密码。
-- 图片上传失败：仅允许 JPEG、PNG、WebP，最大 5 MB；服务会通过 Sharp 生成 WebP 详情图和缩略图，先确认 `npm install` 已完整安装生产依赖。
+- 图片上传失败：仅允许 JPEG、PNG、WebP，单文件最大 20 MB；服务会通过 Sharp 生成 WebP 详情图和缩略图，先确认已按生产流程执行 `npm ci` 并完整安装依赖。
 - 旧设备图片加载仍慢：历史图片不会自动转换，可在管理后台重新上传该设备图片以生成优化后的缩略图和详情图。
 - 管理员登录失效：服务重启会清空内存 Session，重新登录即可。

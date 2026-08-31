@@ -1,6 +1,6 @@
 # 设备管理项目代码结构与定位指南
 
-> 最后更新：2026-08-14  
+> 最后更新：2026-08-31
 > 适用版本：当前本地工作区（网页端 UX、管理员邮件通知、原生微信小程序普通用户端）  
 > 用途：回答“一个需求应该改哪里、会影响什么、用什么验证”。产品规则以 [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) 为准，短期进度以 [`CURRENT_STATUS.md`](CURRENT_STATUS.md) 为准。
 
@@ -86,6 +86,9 @@ flowchart TD
 ├─ public/
 │  ├─ assets/                        # 院徽、favicon 等源码静态资源
 │  ├─ fonts/                         # Noto Sans SC 400/700 的本地 WOFF2 子集与许可证
+│  ├─ js/                            # 用户端按需加载的静态动画脚本
+│  │  ├─ anime.min.js                # Anime.js 2.2.0
+│  │  └─ fireworks.js                 # 用户端 Canvas 点击粒子特效
 │  └─ qrcodes/                       # 本地二维码输出，生产为持久化目录
 ├─ data/                             # 本地 JSON 数据，生产为持久化目录
 ├─ uploads/                          # 本地上传图片，生产为持久化目录
@@ -142,7 +145,7 @@ flowchart TD
 1. Helmet/CSP 根据 `APP_BASE_URL` 是否为 HTTPS 决定 HSTS 和升级策略。
 2. JSON 与表单体限制为 `32kb`。
 3. `/uploads` 使用一年不可变缓存，`/qrcodes` 和前端静态资源由 Express 发布。
-4. Multer 只接受 JPEG/PNG/WebP，单文件不超过 5 MB。
+4. Multer 只接受 JPEG/PNG/WebP，单文件不超过 20 MB。
 5. `validateUploadedImage` 校验文件签名。
 6. `optimizeUploadedImage` 使用 Sharp 旋转、缩放并输出详情图和缩略图 WebP。
 
@@ -410,7 +413,7 @@ npm run build
 
 ## 13. 历史 UI 问题定位（已处理）
 
-2026-07-24 截图确认、尚未修改：
+以下问题于 2026-07-24 由截图确认，现已处理：
 
 | 问题 | 根因定位 | 处理结果 |
 |---|---|---|
