@@ -275,6 +275,9 @@ test('offline confirmation happens before the optional reason prompt', () => {
 test('administrator device deletion asks before cascading borrowing records', () => {
   assert.match(source, /deleteRecords=true/);
   assert.match(source, /借用记录/);
+  // 借出中的设备连下线都不允许，删除同样必须在归还后进行。
+  assert.match(source, /设备正在借用中，请归还后再删除/);
+  assert.match(source, /deleteDevice[\s\S]*?status === 'borrowed'/);
 });
 
 test('administrator manages operational status and the unified portal QR code', () => {

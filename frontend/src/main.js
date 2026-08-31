@@ -2839,6 +2839,10 @@ const AdminPage = {
     }
 
     async function deleteDevice(dev) {
+      if (dev.status === 'borrowed') {
+        alert('设备正在借用中，请归还后再删除');
+        return;
+      }
       if (!confirm(`确定要删除设备「${dev.name}」吗？`)) return;
       let res = await apiCall('DELETE', '/api/devices/' + dev.id);
       if (res.requiresRecordDeletion) {

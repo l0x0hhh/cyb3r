@@ -914,6 +914,25 @@ test('privacy and administrator record-management contract', async t => {
     assert.equal(result.body.data.some(record => record.deviceId === 'DEV_AVAILABLE'), false);
   });
 
+  await t.test('borrowed devices cannot be deleted even with record deletion confirmed', async () => {
+    let result = await request('/api/devices/DEV_BORROWED', {
+      method: 'DELETE',
+      headers: { 'x-session-id': sessionId }
+    });
+    assert.equal(result.response.status, 409);
+    assert.match(result.body.message, /借用中/);
+
+    result = await request('/api/devices/DEV_BORROWED?deleteRecords=true', {
+      method: 'DELETE',
+      headers: { 'x-session-id': sessionId }
+    });
+    assert.equal(result.response.status, 409);
+    assert.match(result.body.message, /借用中/);
+
+    const list = await request('/api/devices', { headers: { 'x-session-id': sessionId } });
+    assert.equal(list.body.data.some(device => device.id === 'DEV_BORROWED'), true);
+  });
+
   await t.test('GET /api/categories returns the 5 initial categories', async () => {
     const { response, body } = await request('/api/categories');
     assert.equal(response.status, 200);

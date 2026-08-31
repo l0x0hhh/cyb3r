@@ -265,7 +265,7 @@ test('three event types render their own independent templates', async t => {
       recipients: ['admin@example.com'],
       smtp: { host: '127.0.0.1', port: env.smtp.port, security: 'none', username: 'sender@example.com', secret: 'secret' },
       templates: {
-        borrow: { subject: '【借出】{{deviceName}}', body: '借出正文\n设备：{{deviceName}}\n姓名：{{borrowerName}}' },
+        borrow: { subject: '【借出】{{deviceName}}', body: '借出正文\n设备：{{deviceName}}\n姓名：{{borrowerName}}\n借用时间：{{borrowedAt}}' },
         return: { subject: '【归还】{{deviceName}}', body: '归还正文\n设备：{{deviceName}}\n备注：{{returnNotes}}' },
         adminReturn: { subject: '【管理归还】{{deviceName}}', body: '管理归还正文\n设备：{{deviceName}}' }
       }
@@ -286,6 +286,9 @@ test('three event types render their own independent templates', async t => {
   assert.equal(messages.length, 1);
   assert.match(decodeMessageSubject(messages[0]), /【借出】测试相机/);
   assert.match(decodeMessageBody(messages[0]), /借出正文/);
+  // 时间变量渲染为北京时间可读格式，而不是原始 ISO 字符串。
+  assert.match(decodeMessageBody(messages[0]), /借用时间：\d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
+  assert.doesNotMatch(decodeMessageBody(messages[0]), /T\d{2}:\d{2}:\d{2}\.\d{3}Z/);
 
   const lookup = await request('/api/records/return-lookup', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },

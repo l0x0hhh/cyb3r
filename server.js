@@ -618,6 +618,15 @@ function maskIdentifier(identifier) {
   return `${value.slice(0, 2)}${'*'.repeat(Math.max(1, value.length - 4))}${value.slice(-2)}`;
 }
 
+// 邮件里的时间统一转成北京时间可读格式，避免把 ISO 字符串直接展示给收件人。
+function formatEmailTime(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return String(value || '');
+  const shifted = new Date(date.getTime() + 8 * 60 * 60 * 1000);
+  const pad = n => String(n).padStart(2, '0');
+  return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())} ${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}`;
+}
+
 // 模板字段统一在服务端按配置脱敏，避免前端或管理员误选变量造成隐私泄露。
 function buildEmailValues(eventType, record, settings = DEFAULT_EMAIL_SETTINGS) {
   const event = EMAIL_EVENTS[eventType] || EMAIL_EVENTS.borrow;
@@ -638,8 +647,8 @@ function buildEmailValues(eventType, record, settings = DEFAULT_EMAIL_SETTINGS) 
     borrowerPhoneMasked: maskPhone(borrowerPhone),
     major: getRecordMajor(record),
     purpose: getRecordPurpose(record),
-    borrowedAt: String(record.createdAt || ''),
-    eventAt: String(record.returnedAt || new Date().toISOString()),
+    borrowedAt: formatEmailTime(record.createdAt),
+    eventAt: formatEmailTime(record.returnedAt || new Date().toISOString()),
     returnNotes: String(record.returnNotes || '')
   };
 }
@@ -1442,6 +1451,10 @@ app.delete('/api/devices/:id', requireAdminPermission('devices'), (req, res) => 
   try {
     let devices = readJSON(DEVICES_FILE);
     const device = devices.find(d => d.id === req.params.id);
+    // 借出中的设备连下线都不允许，删除同样必须在归还后进行。
+    if (device?.status === 'borrowed') {
+      return res.status(409).json({ success: false, message: '设备正在借用中，请归还后再删除' });
+    }
     const records = readJSON(RECORDS_FILE);
     const relatedRecords = records.filter(record => record.deviceId === req.params.id);
     const deleteRecords = req.query.deleteRecords === 'true';
