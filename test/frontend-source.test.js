@@ -585,8 +585,13 @@ test('administrator can configure encrypted SMTP notifications and event rules',
   assert.match(source, /emailSettings\.notifyAdminReturn/);
   assert.match(source, /type="password"[^>]*autocomplete="new-password"/);
   assert.match(source, /secretConfigured/);
-  assert.match(source, /subjectTemplate/);
-  assert.match(source, /bodyTemplate/);
+  assert.match(source, /emailSettings\.templates\[emailPreviewEvent\.value\]/);
+  assert.match(source, /templates\[emailPreviewEvent\]\.subject/);
+  assert.match(source, /templates\[emailPreviewEvent\]\.body/);
+  assert.match(source, /设备借出：\{\{deviceName\}\}/);
+  assert.match(source, /用户归还：\{\{deviceName\}\}/);
+  assert.match(source, /管理员归还：\{\{deviceName\}\}/);
+  assert.match(source, /templates:\s*\{\s*borrow:/);
   assert.match(source, /maskSensitiveData/);
   assert.match(source, /emailTemplateFields/);
   assert.match(source, /borrowerPhoneMasked/);

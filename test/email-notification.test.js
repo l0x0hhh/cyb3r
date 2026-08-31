@@ -63,6 +63,7 @@ function startFakeSmtpServer() {
     server.listen({ host: '127.0.0.1', port: 0 }, () => resolve({
       port: server.address().port,
       getMessage: () => receivedMessages.at(-1) || '',
+      getMessages: () => [...receivedMessages],
       close: () => new Promise(done => server.close(done))
     }));
   });
@@ -182,4 +183,193 @@ test('successful borrowing queues a masked administrator email notification', as
   assert.match(body, /工号：20\*+01/);
   assert.match(body, /电话：138\*\*\*\*/);
   assert.doesNotMatch(body, /13800138000/);
+});
+
+function decodeMessageSubject(message) {
+  const match = String(message).match(/Subject: =\?UTF-8\?B\?([A-Za-z0-9+/=]+)\?=/);
+  return match ? Buffer.from(match[1], 'base64').toString('utf8') : '';
+}
+
+function decodeMessageBody(message) {
+  return Buffer.from(String(message).split('\r\n\r\n').at(-1).replace(/\r\n/g, ''), 'base64').toString('utf8');
+}
+
+async function waitForMessageCount(smtp, count, deadline = 5000) {
+  const started = Date.now();
+  while (smtp.getMessages().length < count && Date.now() - started < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  return smtp.getMessages();
+}
+
+async function startEmailTestServer() {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-management-email-test-'));
+  const uploadDir = path.join(dataDir, 'uploads');
+  const qrDir = path.join(dataDir, 'qrcodes');
+  fs.mkdirSync(uploadDir, { recursive: true });
+  fs.mkdirSync(qrDir, { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'devices.json'), JSON.stringify([{
+    id: 'DEV_EMAIL', name: '测试相机', model: 'EMAIL-1', category: 'cat-camera', status: 'available', createdAt: new Date().toISOString()
+  }]));
+  fs.writeFileSync(path.join(dataDir, 'records.json'), '[]');
+
+  const smtp = await startFakeSmtpServer();
+  const child = spawn(process.execPath, ['server.js'], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      DATA_DIR: dataDir,
+      UPLOAD_DIR: uploadDir,
+      QR_DIR: qrDir,
+      ADMIN_PASSWORD: 'test-secret',
+      EMAIL_CONFIG_KEY: 'b'.repeat(64)
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  let output = '';
+  child.stdout.on('data', chunk => { output += chunk.toString(); });
+  child.stderr.on('data', chunk => { output += chunk.toString(); });
+
+  await waitForServer();
+  const login = await request('/api/admin/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'test-secret' })
+  });
+  if (!login.body.success) throw new Error(`管理员登录失败: ${output}`);
+  return {
+    smtp,
+    child,
+    sessionId: login.body.sessionId,
+    dataDir,
+    output,
+    cleanup: async () => {
+      child.kill();
+      await smtp.close();
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  };
+}
+
+test('three event types render their own independent templates', async t => {
+  const env = await startEmailTestServer();
+  t.after(env.cleanup);
+
+  const save = await request('/api/admin/email-settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'x-session-id': env.sessionId },
+    body: JSON.stringify({
+      enabled: true,
+      notifyBorrow: true,
+      notifyReturn: true,
+      notifyAdminReturn: true,
+      recipients: ['admin@example.com'],
+      smtp: { host: '127.0.0.1', port: env.smtp.port, security: 'none', username: 'sender@example.com', secret: 'secret' },
+      templates: {
+        borrow: { subject: '【借出】{{deviceName}}', body: '借出正文\n设备：{{deviceName}}\n姓名：{{borrowerName}}' },
+        return: { subject: '【归还】{{deviceName}}', body: '归还正文\n设备：{{deviceName}}\n备注：{{returnNotes}}' },
+        adminReturn: { subject: '【管理归还】{{deviceName}}', body: '管理归还正文\n设备：{{deviceName}}' }
+      }
+    })
+  });
+  assert.equal(save.response.status, 200, env.output);
+  assert.equal(save.body.data.templates.borrow.subject, '【借出】{{deviceName}}');
+  assert.equal(save.body.data.templates.return.subject, '【归还】{{deviceName}}');
+  assert.equal(save.body.data.templates.adminReturn.subject, '【管理归还】{{deviceName}}');
+
+  const borrowBody = { deviceId: 'DEV_EMAIL', borrowerName: '张三', borrowerId: '2026000001', borrowerPhone: '13800138000', major: '网络安全', purpose: '课程拍摄' };
+  const borrow = await request('/api/records/borrow', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(borrowBody)
+  });
+  assert.equal(borrow.response.status, 200);
+
+  let messages = await waitForMessageCount(env.smtp, 1);
+  assert.equal(messages.length, 1);
+  assert.match(decodeMessageSubject(messages[0]), /【借出】测试相机/);
+  assert.match(decodeMessageBody(messages[0]), /借出正文/);
+
+  const lookup = await request('/api/records/return-lookup', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ borrowerName: '张三', borrowerPhone: '13800138000' })
+  });
+  assert.equal(lookup.response.status, 200);
+  const firstRecordId = lookup.body.data.records[0].recordId;
+
+  const returned = await request('/api/records/return', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recordId: firstRecordId, returnToken: lookup.body.data.returnToken, notes: '完好归还' })
+  });
+  assert.equal(returned.response.status, 200);
+
+  messages = await waitForMessageCount(env.smtp, 2);
+  assert.match(decodeMessageSubject(messages[1]), /【归还】测试相机/);
+  assert.match(decodeMessageBody(messages[1]), /归还正文/);
+  assert.match(decodeMessageBody(messages[1]), /备注：完好归还/);
+
+  const borrowAgain = await request('/api/records/borrow', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(borrowBody)
+  });
+  assert.equal(borrowAgain.response.status, 200);
+  messages = await waitForMessageCount(env.smtp, 3);
+  assert.match(decodeMessageSubject(messages[2]), /【借出】测试相机/);
+
+  const lookupAgain = await request('/api/records/return-lookup', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ borrowerName: '张三', borrowerPhone: '13800138000' })
+  });
+  const secondRecordId = lookupAgain.body.data.records[0].recordId;
+  const forceReturn = await request(`/api/records/${secondRecordId}/force-return`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': env.sessionId },
+    body: JSON.stringify({ notes: '管理员确认归还' })
+  });
+  assert.equal(forceReturn.response.status, 200);
+
+  messages = await waitForMessageCount(env.smtp, 4);
+  assert.match(decodeMessageSubject(messages[3]), /【管理归还】测试相机/);
+  assert.match(decodeMessageBody(messages[3]), /管理归还正文/);
+});
+
+test('legacy subject and body templates act as a fallback for every event', async t => {
+  const env = await startEmailTestServer();
+  t.after(env.cleanup);
+
+  const save = await request('/api/admin/email-settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'x-session-id': env.sessionId },
+    body: JSON.stringify({
+      enabled: true,
+      notifyBorrow: true,
+      notifyReturn: true,
+      notifyAdminReturn: true,
+      recipients: ['admin@example.com'],
+      smtp: { host: '127.0.0.1', port: env.smtp.port, security: 'none', username: 'sender@example.com', secret: 'secret' },
+      subjectTemplate: '旧模板主题：{{eventLabel}}',
+      bodyTemplate: '旧模板正文：{{deviceName}}'
+    })
+  });
+  assert.equal(save.response.status, 200, env.output);
+  assert.equal(save.body.data.templates.borrow.subject, '旧模板主题：{{eventLabel}}');
+  assert.equal(save.body.data.templates.return.subject, '旧模板主题：{{eventLabel}}');
+  assert.equal(save.body.data.templates.adminReturn.subject, '旧模板主题：{{eventLabel}}');
+  assert.equal(save.body.data.subjectTemplate, '旧模板主题：{{eventLabel}}');
+
+  const borrow = await request('/api/records/borrow', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceId: 'DEV_EMAIL', borrowerName: '张三', borrowerId: '2026000001', borrowerPhone: '13800138000', major: '网络安全', purpose: '课程拍摄' })
+  });
+  assert.equal(borrow.response.status, 200);
+  let messages = await waitForMessageCount(env.smtp, 1);
+  assert.match(decodeMessageSubject(messages[0]), /旧模板主题：设备借出/);
+  assert.match(decodeMessageBody(messages[0]), /旧模板正文：测试相机/);
+
+  const lookup = await request('/api/records/return-lookup', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ borrowerName: '张三', borrowerPhone: '13800138000' })
+  });
+  const returned = await request('/api/records/return', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recordId: lookup.body.data.records[0].recordId, returnToken: lookup.body.data.returnToken, notes: '归还' })
+  });
+  assert.equal(returned.response.status, 200);
+  messages = await waitForMessageCount(env.smtp, 2);
+  assert.match(decodeMessageSubject(messages[1]), /旧模板主题：用户归还/);
 });

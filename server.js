@@ -56,21 +56,44 @@ const DEFAULT_EMAIL_SETTINGS = {
   notifyAdminReturn: false,
   recipients: [],
   smtp: { host: '', port: 465, security: 'ssl', username: '', secretEncrypted: '' },
-  subjectTemplate: '【设备管理】{{eventLabel}}：{{deviceName}}',
+  // 兼容旧字段：升级前的部署只有 subjectTemplate/bodyTemplate，始终与借出模板保持一致。
+  subjectTemplate: '【设备管理】设备借出：{{deviceName}}',
   bodyTemplate: [
-    '设备管理通知',
-    '',
-    '事件：{{eventLabel}}',
-    '设备名称：{{deviceName}}',
-    '设备型号：{{deviceModel}}',
-    '设备编号：{{deviceId}}',
-    '借用人：{{borrowerName}}',
-    '联系电话：{{borrowerPhoneMasked}}',
-    '专业/部门：{{major}}',
-    '借用用途：{{purpose}}',
-    '借用时间：{{borrowedAt}}',
-    '操作时间：{{eventAt}}'
-  ].join('\n')
+    '设备借出通知', '',
+    '事件：设备借出', '设备名称：{{deviceName}}', '设备型号：{{deviceModel}}', '设备编号：{{deviceId}}',
+    '借用人：{{borrowerName}}', '联系电话：{{borrowerPhoneMasked}}', '专业/部门：{{major}}',
+    '借用用途：{{purpose}}', '借用时间：{{borrowedAt}}', '操作时间：{{eventAt}}'
+  ].join('\n'),
+  // 三套事件各自独立的主题和正文；事件名写死，其余字段继续使用变量。
+  templates: {
+    borrow: {
+      subject: '【设备管理】设备借出：{{deviceName}}',
+      body: [
+        '设备借出通知', '',
+        '事件：设备借出', '设备名称：{{deviceName}}', '设备型号：{{deviceModel}}', '设备编号：{{deviceId}}',
+        '借用人：{{borrowerName}}', '联系电话：{{borrowerPhoneMasked}}', '专业/部门：{{major}}',
+        '借用用途：{{purpose}}', '借用时间：{{borrowedAt}}', '操作时间：{{eventAt}}'
+      ].join('\n')
+    },
+    return: {
+      subject: '【设备管理】用户归还：{{deviceName}}',
+      body: [
+        '用户归还通知', '',
+        '事件：用户归还', '设备名称：{{deviceName}}', '设备型号：{{deviceModel}}', '设备编号：{{deviceId}}',
+        '借用人：{{borrowerName}}', '联系电话：{{borrowerPhoneMasked}}', '专业/部门：{{major}}',
+        '借用用途：{{purpose}}', '借用时间：{{borrowedAt}}', '归还时间：{{eventAt}}', '归还备注：{{returnNotes}}'
+      ].join('\n')
+    },
+    adminReturn: {
+      subject: '【设备管理】管理员归还：{{deviceName}}',
+      body: [
+        '管理员归还通知', '',
+        '事件：管理员归还', '设备名称：{{deviceName}}', '设备型号：{{deviceModel}}', '设备编号：{{deviceId}}',
+        '借用人：{{borrowerName}}', '联系电话：{{borrowerPhoneMasked}}', '专业/部门：{{major}}',
+        '借用用途：{{purpose}}', '借用时间：{{borrowedAt}}', '归还时间：{{eventAt}}', '归还备注：{{returnNotes}}'
+      ].join('\n')
+    }
+  }
 };
 function initDataFile(filePath, initial) {
   if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, JSON.stringify(initial, null, 2));
@@ -394,11 +417,18 @@ function readEmailSettings() {
   const stored = readJSON(EMAIL_SETTINGS_FILE);
   const source = stored && !Array.isArray(stored) ? stored : {};
   const defaults = cloneEmailSettings();
+  const storedTemplates = source.templates && !Array.isArray(source.templates) ? source.templates : {};
   return {
     ...defaults,
     ...source,
     smtp: { ...defaults.smtp, ...(source.smtp || {}) },
-    recipients: Array.isArray(source.recipients) ? source.recipients : defaults.recipients
+    recipients: Array.isArray(source.recipients) ? source.recipients : defaults.recipients,
+    // 事件级合并默认模板，旧部署缺少 templates 或只存部分事件时不会丢默认值。
+    templates: {
+      borrow: { ...defaults.templates?.borrow, ...(storedTemplates.borrow || {}) },
+      return: { ...defaults.templates?.return, ...(storedTemplates.return || {}) },
+      adminReturn: { ...defaults.templates?.adminReturn, ...(storedTemplates.adminReturn || {}) }
+    }
   };
 }
 
@@ -503,6 +533,37 @@ function normalizeEmailSettings(body, current) {
   if (/[\r\n]/.test(next.subjectTemplate)) throw new Error('邮件主题不能包含换行');
   next.bodyTemplate = validateEmailTemplate(bodyTemplate, '邮件正文', 8000);
 
+  // 三套独立模板：请求未携带 templates 时整组回退到兼容旧字段（旧前端行为）；
+  // 携带 templates 时按 请求值 > 当前值 > 旧字段 逐事件解析，未提交的事件沿用当前配置。
+  const requestedTemplates = body.templates && typeof body.templates === 'object' && !Array.isArray(body.templates) ? body.templates : {};
+  const currentTemplates = current.templates && typeof current.templates === 'object' && !Array.isArray(current.templates) ? current.templates : {};
+  next.templates = {};
+  for (const eventType of Object.keys(EMAIL_EVENTS)) {
+    const label = EMAIL_EVENTS[eventType].label;
+    const requestedEvent = requestedTemplates[eventType] && typeof requestedTemplates[eventType] === 'object' ? requestedTemplates[eventType] : {};
+    const currentEvent = currentTemplates[eventType] && typeof currentTemplates[eventType] === 'object' ? currentTemplates[eventType] : {};
+    // 请求未携带 templates 字段时，整个事件组回退到旧字段，保持旧版共用一套模板的行为。
+    const eventSubject = body.templates === undefined
+      ? next.subjectTemplate
+      : (requestedEvent.subject === undefined
+        ? (currentEvent.subject === undefined ? next.subjectTemplate : currentEvent.subject)
+        : requestedEvent.subject);
+    const eventBody = body.templates === undefined
+      ? next.bodyTemplate
+      : (requestedEvent.body === undefined
+        ? (currentEvent.body === undefined ? next.bodyTemplate : currentEvent.body)
+        : requestedEvent.body);
+    const normalizedSubject = validateEmailTemplate(eventSubject, `${label}邮件主题`, 160);
+    if (/[\r\n]/.test(normalizedSubject)) throw new Error(`${label}邮件主题不能包含换行`);
+    next.templates[eventType] = {
+      subject: normalizedSubject,
+      body: validateEmailTemplate(eventBody, `${label}邮件正文`, 8000)
+    };
+  }
+  // 旧字段始终同步为借出模板，旧前端和旧数据读取不受影响。
+  next.subjectTemplate = next.templates.borrow.subject;
+  next.bodyTemplate = next.templates.borrow.body;
+
   if (next.enabled) {
     if (!next.recipients.length) throw new Error('启用通知前请填写至少一个接收邮箱');
     if (!next.smtp.host || !next.smtp.username || !next.smtp.secretEncrypted) throw new Error('启用通知前请完整填写 SMTP 配置');
@@ -527,7 +588,22 @@ function toPublicEmailSettings(settings) {
       secretConfigured: Boolean(settings.smtp.secretEncrypted)
     },
     subjectTemplate: settings.subjectTemplate,
-    bodyTemplate: settings.bodyTemplate
+    bodyTemplate: settings.bodyTemplate,
+    templates: {
+      borrow: resolveEventTemplate(settings, 'borrow'),
+      return: resolveEventTemplate(settings, 'return'),
+      adminReturn: resolveEventTemplate(settings, 'adminReturn')
+    }
+  };
+}
+
+// 三套模板解析：优先事件级模板，缺失字段回退到兼容旧字段，保证升级前配置继续生效。
+function resolveEventTemplate(settings, eventType) {
+  const pair = settings.templates?.[eventType] || {};
+  const legacy = { subject: settings.subjectTemplate, body: settings.bodyTemplate };
+  return {
+    subject: String(pair.subject || legacy.subject || ''),
+    body: String(pair.body || legacy.body || '')
   };
 }
 
@@ -579,8 +655,9 @@ function queueEmailNotification(eventType, record) {
     return;
   }
   const values = buildEmailValues(eventType, record, settings);
-  const subject = formatEmailTemplate(settings.subjectTemplate, values);
-  const text = formatEmailTemplate(settings.bodyTemplate, values);
+  const template = resolveEventTemplate(settings, eventType);
+  const subject = formatEmailTemplate(template.subject, values);
+  const text = formatEmailTemplate(template.body, values);
   void sendSmtpMail({
     smtp: settings.smtp,
     secret,
@@ -1501,12 +1578,13 @@ app.post('/api/admin/email-settings/test', requireAdminPermission('email-setting
       returnNotes: '示例备注'
     };
     const values = buildEmailValues(eventType, sampleRecord, settings);
+    const template = resolveEventTemplate(settings, eventType);
     await sendSmtpMail({
       smtp: settings.smtp,
       secret,
       recipients: settings.recipients,
-      subject: `【测试】${formatEmailTemplate(settings.subjectTemplate, values)}`,
-      text: formatEmailTemplate(settings.bodyTemplate, values)
+      subject: `【测试】${formatEmailTemplate(template.subject, values)}`,
+      text: formatEmailTemplate(template.body, values)
     });
     res.json({ success: true, message: '测试邮件已发送' });
   } catch (e) {

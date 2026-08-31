@@ -1164,7 +1164,7 @@ const AdminPage = {
           <!-- 模板编辑器把变量、预览和隐私状态放在同一工作区，管理员无需记忆占位符语法。 -->
           <section class="email-settings-section email-settings-templates">
             <div class="statistics-section__header email-template-header">
-              <div><h3>邮件内容</h3><span>编辑内容时，下方预览会同步更新</span></div>
+              <div><h3>邮件内容</h3><span>当前编辑：{{ emailTemplateLabel }}模板，下方预览会同步更新</span></div>
               <label class="email-settings-check email-privacy-toggle">
                 <input v-model="emailSettings.maskSensitiveData" type="checkbox" />
                 <span>隐藏借用人信息</span>
@@ -1181,7 +1181,7 @@ const AdminPage = {
               <div class="email-template-editors">
                 <div class="form-group email-settings-field">
                   <label for="email-subject-template">邮件主题</label>
-                  <input id="email-subject-template" ref="emailSubjectInput" v-model="emailSettings.subjectTemplate" class="input" maxlength="160" />
+                  <input id="email-subject-template" ref="emailSubjectInput" v-model="emailSettings.templates[emailPreviewEvent].subject" class="input" maxlength="160" />
                   <div class="email-variable-toolbar" aria-label="插入主题字段">
                     <span>插入字段</span>
                     <button v-for="field in emailTemplateFields" :key="'subject-' + field.key" type="button" class="email-variable-button" :title="'插入' + field.label" @click="insertEmailVariable(field.key, 'subject')">{{ field.label }}</button>
@@ -1189,7 +1189,7 @@ const AdminPage = {
                 </div>
                 <div class="form-group email-settings-field">
                   <label for="email-body-template">邮件正文</label>
-                  <textarea id="email-body-template" ref="emailBodyInput" v-model="emailSettings.bodyTemplate" class="input textarea email-body-editor" rows="14"></textarea>
+                  <textarea id="email-body-template" ref="emailBodyInput" v-model="emailSettings.templates[emailPreviewEvent].body" class="input textarea email-body-editor" rows="14"></textarea>
                   <div class="email-variable-toolbar" aria-label="插入正文字段">
                     <span>插入字段</span>
                     <button v-for="field in emailTemplateFields" :key="'body-' + field.key" type="button" class="email-variable-button" :title="'插入' + field.label" @click="insertEmailVariable(field.key, 'body')">{{ field.label }}</button>
@@ -1757,25 +1757,50 @@ const AdminPage = {
         notifyAdminReturn: false,
         recipientsText: '',
         smtp: { host: '', port: 465, security: 'ssl', username: '', secret: '', secretConfigured: false },
-        subjectTemplate: '【设备管理】{{eventLabel}}：{{deviceName}}',
-        bodyTemplate: [
-          '设备管理通知', '', '事件：{{eventLabel}}', '设备名称：{{deviceName}}', '设备型号：{{deviceModel}}',
-          '设备编号：{{deviceId}}', '借用人：{{borrowerName}}', '联系电话：{{borrowerPhoneMasked}}',
-          '专业/部门：{{major}}', '借用用途：{{purpose}}', '借用时间：{{borrowedAt}}', '操作时间：{{eventAt}}'
-        ].join('\n')
+        // 三类事件各自独立的主题和正文；事件名写死，其余字段继续使用变量。
+        templates: {
+          borrow: {
+            subject: '【设备管理】设备借出：{{deviceName}}',
+            body: [
+              '设备借出通知', '', '事件：设备借出', '设备名称：{{deviceName}}', '设备型号：{{deviceModel}}',
+              '设备编号：{{deviceId}}', '借用人：{{borrowerName}}', '联系电话：{{borrowerPhoneMasked}}',
+              '专业/部门：{{major}}', '借用用途：{{purpose}}', '借用时间：{{borrowedAt}}', '操作时间：{{eventAt}}'
+            ].join('\n')
+          },
+          return: {
+            subject: '【设备管理】用户归还：{{deviceName}}',
+            body: [
+              '用户归还通知', '', '事件：用户归还', '设备名称：{{deviceName}}', '设备型号：{{deviceModel}}',
+              '设备编号：{{deviceId}}', '借用人：{{borrowerName}}', '联系电话：{{borrowerPhoneMasked}}',
+              '专业/部门：{{major}}', '借用用途：{{purpose}}', '借用时间：{{borrowedAt}}',
+              '归还时间：{{eventAt}}', '归还备注：{{returnNotes}}'
+            ].join('\n')
+          },
+          adminReturn: {
+            subject: '【设备管理】管理员归还：{{deviceName}}',
+            body: [
+              '管理员归还通知', '', '事件：管理员归还', '设备名称：{{deviceName}}', '设备型号：{{deviceModel}}',
+              '设备编号：{{deviceId}}', '借用人：{{borrowerName}}', '联系电话：{{borrowerPhoneMasked}}',
+              '专业/部门：{{major}}', '借用用途：{{purpose}}', '借用时间：{{borrowedAt}}',
+              '归还时间：{{eventAt}}', '归还备注：{{returnNotes}}'
+            ].join('\n')
+          }
+        }
       });
       // 模板预览使用固定示例数据，只用于当前浏览器展示，不会写入设备或借用记录。
       const emailTemplateFields = EMAIL_TEMPLATE_FIELDS;
       const emailPreviewEvents = EMAIL_PREVIEW_EVENTS;
       const emailPreviewEvent = Vue.ref('borrow');
+      const emailTemplateLabel = Vue.computed(() => emailPreviewEvents.find(item => item.key === emailPreviewEvent.value)?.label || '');
       const emailSubjectInput = Vue.ref(null);
       const emailBodyInput = Vue.ref(null);
       const emailTemplateErrors = Vue.computed(() => {
         const supported = new Set(emailTemplateFields.map(field => field.key));
+        const currentTemplate = emailSettings.templates[emailPreviewEvent.value];
         const errors = [];
         for (const [label, value, maxLength, singleLine] of [
-          ['邮件主题', emailSettings.subjectTemplate, 160, true],
-          ['邮件正文', emailSettings.bodyTemplate, 8000, false]
+          ['邮件主题', currentTemplate.subject, 160, true],
+          ['邮件正文', currentTemplate.body, 8000, false]
         ]) {
           const text = String(value || '');
           const placeholders = text.match(/\{\{([^{}]+)\}\}/g) || [];
@@ -1812,9 +1837,10 @@ const AdminPage = {
           returnNotes: '示例备注'
         };
         const render = template => String(template || '').replace(/\{\{([^{}]+)\}\}/g, (_, variable) => String(values[variable.trim()] ?? ''));
+        const currentTemplate = emailSettings.templates[event.key];
         return {
-          subject: `【测试】${render(emailSettings.subjectTemplate)}`,
-          body: render(emailSettings.bodyTemplate)
+          subject: `【测试】${render(currentTemplate.subject)}`,
+          body: render(currentTemplate.body)
         };
       });
       const emailSettingsMessage = Vue.ref('');
@@ -2121,8 +2147,14 @@ const AdminPage = {
         secret: '',
         secretConfigured: Boolean(data.smtp?.secretConfigured)
       };
-      emailSettings.subjectTemplate = data.subjectTemplate || emailSettings.subjectTemplate;
-      emailSettings.bodyTemplate = data.bodyTemplate || emailSettings.bodyTemplate;
+      if (data.templates && typeof data.templates === 'object') {
+        for (const key of ['borrow', 'return', 'adminReturn']) {
+          const event = data.templates[key];
+          if (!event) continue;
+          if (typeof event.subject === 'string' && event.subject) emailSettings.templates[key].subject = event.subject;
+          if (typeof event.body === 'string' && event.body) emailSettings.templates[key].body = event.body;
+        }
+      }
     }
 
     // 变量按钮插入当前光标位置，并在 Vue 更新后恢复焦点，连续点击时保持编辑节奏。
@@ -2130,12 +2162,13 @@ const AdminPage = {
       const input = target === 'subject' ? emailSubjectInput.value : emailBodyInput.value;
       if (!input) return;
       const token = `{{${variable}}}`;
-      const value = target === 'subject' ? emailSettings.subjectTemplate : emailSettings.bodyTemplate;
+      const currentTemplate = emailSettings.templates[emailPreviewEvent.value];
+      const value = target === 'subject' ? currentTemplate.subject : currentTemplate.body;
       const start = Number.isInteger(input.selectionStart) ? input.selectionStart : value.length;
       const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : start;
       const nextValue = `${value.slice(0, start)}${token}${value.slice(end)}`;
-      if (target === 'subject') emailSettings.subjectTemplate = nextValue;
-      else emailSettings.bodyTemplate = nextValue;
+      if (target === 'subject') currentTemplate.subject = nextValue;
+      else currentTemplate.body = nextValue;
       Vue.nextTick(() => {
         input.focus();
         const cursor = start + token.length;
@@ -2162,8 +2195,11 @@ const AdminPage = {
           username: emailSettings.smtp.username,
           secret: emailSettings.smtp.secret
         },
-        subjectTemplate: emailSettings.subjectTemplate,
-        bodyTemplate: emailSettings.bodyTemplate
+        templates: {
+          borrow: { subject: emailSettings.templates.borrow.subject, body: emailSettings.templates.borrow.body },
+          return: { subject: emailSettings.templates.return.subject, body: emailSettings.templates.return.body },
+          adminReturn: { subject: emailSettings.templates.adminReturn.subject, body: emailSettings.templates.adminReturn.body }
+        }
       };
     }
 
