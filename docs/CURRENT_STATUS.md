@@ -5,7 +5,7 @@
 
 ## 当前目标
 
-保持学院设备借还系统可维护、可安全部署；当前优先处理邮件通知模板的独立化，并完成最近本地 UI 调整的人工验收。
+保持学院设备借还系统可维护、可安全部署；当前优先处理邮件通知模板的独立化。
 
 ## 第一待办
 
@@ -16,15 +16,13 @@
 | 状态面 | 当前结论 | 证据或备注 |
 | --- | --- | --- |
 | 本地已完成 | 上传与首包优化阶段 1、2；管理员分级、导航和权限修复；管理端 AppBar 满宽样式；用户端顶部品牌栏和借还分段控件统一宽版容器；Noto Sans SC 字体本地化；用户端和管理端页脚合并服务备案号与运行时长；公开设备列表改为响应式独立列式瀑布流；用户端点击粒子特效；PC 端详情页返回体验（返回取消向上收回动效并恢复列表滚动位置） | 字体资源位于 `public/fonts/`，入口改为本地 CSS，移除 Google Fonts 远程引用；用户端顶部使用 1180px 宽版容器，归还查询内容保留 720px 可读宽度，两个 tab 自动均分；备案号与运行时长显示为同一元信息行并链接工信部备案官网；瀑布流按手机 2、平板 3、桌面 4 列分配；粒子特效仅在 `/borrow` 创建 Canvas 并按需加载脚本，`/admin` 不加载 |
-| 本地已验证 | AppBar 定向契约 1/1；两个入口语法检查；完整 `npm test` 153/153；点击粒子特效定向契约 1/1；`node --check server.js` 与前端入口通过；标准 `npm run build` 通过（EPERM 阻塞已解除） | 构建仅保留既有大体积 chunk 提示；PC 端详情返回契约测试通过；点击粒子特效和 PC 端详情返回均尚待用户浏览器确认后同步 |
-| 已同步服务器 | 生产源码已同步到 `b7c2beb`；服务器当前跟踪 `main`；该提交包含 AppBar 满宽、Noto Sans SC 字体、备案号页脚、设备瀑布流和用户端顶部宽版布局 | 更新脚本输出 `Deployment completed at b7c2bebacfe40112b1a64f42edf642686201ba8a`；本轮点击粒子特效与 PC 端详情返回改动均尚未同步服务器 |
-| 生产已验证 | 服务、普通管理员权限隔离、一言、WebP 图片加载和 Nginx 配置已由用户确认；`b7c2beb` 中的 AppBar 满宽、Noto Sans SC 字体、备案号页脚、设备瀑布流和用户端顶部宽版布局已完成生产视觉确认 | 当前仅点击粒子特效尚未同步生产，不能把本地特效验证推断为生产验证 |
+| 本地已验证 | AppBar 定向契约 1/1；两个入口语法检查；完整 `npm test` 153/153；点击粒子特效定向契约 1/1；`node --check server.js` 与前端入口通过；标准 `npm run build` 通过（EPERM 阻塞已解除） | 构建仅保留既有大体积 chunk 提示；PC 端详情返回契约测试通过；粒子特效与 PC 端详情返回已同步生产并经用户确认 |
+| 已同步服务器 | 生产源码已同步到 `b4c857e`；服务器当前跟踪 `main`；该提交在前序 AppBar 满宽、字体、备案号页脚、瀑布流和顶部宽版布局基础上，新增用户端点击粒子特效与 PC 端详情返回体验 | 本地 `b7c2beb..b4c857e` 推送成功；用户确认服务器 `update-from-git.sh` 同步完成，远端前端构建通过 |
+| 生产已验证 | 服务、普通管理员权限隔离、一言、WebP 图片加载和 Nginx 配置已由用户确认；`b4c857e` 中的点击粒子特效与 PC 端详情返回体验已由用户在生产确认 | `update-from-git.sh` 同步与健康检查通过；用户硬刷新确认生产页面粒子特效与 PC 端详情返回行为正常 |
 
 ## 活跃事项
 
 1. **邮件模板独立化**：当前仍使用共享模板；这是第一待办，需保持旧数据可读和未提交字段沿用当前配置。
-2. **用户端点击粒子特效**：仅 `/borrow` 按需加载 Anime.js 和 Canvas 粒子脚本；按钮、表单控件、链接、弹窗点击会过滤；尚未同步服务器，等待本地浏览器验收。
-3. **PC 端详情页返回**：返回详情时取消向上收回离场动效并恢复进入前的列表滚动位置；用户确认已实现，工作区含未提交改动；尚未同步服务器，等待浏览器验收。
 
 ## 已知阻塞与边界
 
@@ -33,7 +31,7 @@
 
 ## 本轮涉及文件
 
-- 已改：`server.js`、`frontend/index.html`、`frontend/src/main.js`、`public/fonts/`、`public/js/anime.min.js`、`public/js/fireworks.js`、`test/build-config.test.js`、`test/frontend-source.test.js`、`test/security-config.test.js`、`docs/CURRENT_STATUS.md`、`docs/PROJECT_GUIDE.md`、`docs/CODE_STRUCTURE.md`、`docs/CHANGELOG.md`
+- 已改：`frontend/index.html`、`frontend/src/main.js`、`public/js/anime.min.js`、`public/js/fireworks.js`、`test/frontend-source.test.js`、`AGENTS.md`、`DEPLOY.md`、`README.md`、`docs/`（含本卡与 `CHANGELOG.md`）
 - 未改：生产数据和部署脚本
 
 ## 新会话接续
