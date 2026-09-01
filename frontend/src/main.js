@@ -210,7 +210,6 @@ const BorrowPage = {
             <div class="portal-brand__copy">
               <h1 class="portal-title">设备借还</h1>
               <p class="portal-affiliation">暨南大学网络空间安全学院</p>
-              
             </div>
           </div>
         </div>
@@ -238,6 +237,8 @@ const BorrowPage = {
                 <div class="portal-detail__media" :class="{ 'portal-detail__media--fixed': detailImageAspectRatio(device) || detailImageHeight(device) }" :style="detailMediaStyle(device)">
                   <img v-if="hasImage(device, device.image)" :src="device.image" :srcset="buildSrcset(device)" sizes="(max-width: 560px) 100vw, 720px" :alt="device.name" :width="device.imageWidth || undefined" :height="device.imageHeight || undefined" class="portal-media-image" :class="{ 'is-loaded': isImageLoaded(device.image) }" loading="eager" fetchpriority="high" decoding="async" @load="markImageLoaded(device.image, $event)" @error="markImageFailed(device.image)" />
                   <div v-else class="portal-image-placeholder">暂无设备图片</div>
+                  <!-- 详情打开时播放一次扫描线，减少持续动画对阅读的干扰。 -->
+                  <span class="portal-detail__scan" aria-hidden="true"></span>
                 </div>
                 <div class="portal-detail__body">
                   <div class="portal-detail__heading">
@@ -245,7 +246,7 @@ const BorrowPage = {
                       <h2>{{ device.name }}</h2>
                       <p>{{ device.model }}</p>
                     </div>
-                    <span class="portal-status" :class="deviceStatusClass(device)">{{ deviceStatusText(device) }}</span>
+                    <span class="portal-status" :class="deviceStatusClass(device)"><span class="portal-status__dot" aria-hidden="true"></span>{{ deviceStatusText(device) }}</span>
                   </div>
 
                   <dl class="portal-facts">
@@ -305,11 +306,13 @@ const BorrowPage = {
               <div v-else class="portal-device-list portal-device-list--waterfall">
                 <!-- 按响应式列数轮流分配设备，保证前两台在移动端分别进入左右列。 -->
                 <div v-for="column in deviceColumns" :key="'device-column-' + column.id" class="portal-device-list__column">
-                  <article v-for="entry in column.items" :key="entry.item.id" class="portal-device-row" :class="'portal-device-row--' + categoryColorClass(entry.item.category)" :style="{ '--card-index': entry.index }">
+                  <article v-for="entry in column.items" :key="entry.item.id" class="portal-device-row" :class="['portal-device-row--' + categoryColorClass(entry.item.category), { 'portal-device-row--selected': isInCart(entry.item.id) }]" :style="{ '--card-index': entry.index }">
                     <a :href="'/borrow?id=' + entry.item.id" :data-device-id="entry.item.id" role="button" @click.prevent="openDevice(entry.item.id)" class="portal-device-row__link">
                       <span class="portal-device-row__media" :style="{ aspectRatio: imageDisplayAspectRatio(entry.item) }">
                         <img v-if="hasImage(entry.item, entry.item.imageThumb || entry.item.image)" :src="entry.item.imageThumb || entry.item.image" :alt="entry.item.name" :width="entry.item.imageWidth || undefined" :height="entry.item.imageHeight || undefined" class="portal-media-image" :class="{ 'is-loaded': isImageLoaded(entry.item.imageThumb || entry.item.image) }" :style="{ objectPosition: '50% ' + imageDisplayPositionY(entry.item) + '%' }" :loading="entry.index < 2 ? 'eager' : 'lazy'" :fetchpriority="entry.index < 2 ? 'high' : 'auto'" decoding="async" @load="markImageLoaded(entry.item.imageThumb || entry.item.image, $event)" @error="markImageFailed(entry.item.imageThumb || entry.item.image)" />
                         <span v-else class="portal-image-placeholder portal-image-placeholder--small">暂无图片</span>
+                        <!-- 设备卡片扫描层只在悬停时运行一次，不改变图片加载占位逻辑。 -->
+                        <span class="portal-device-row__scan" aria-hidden="true"></span>
                       </span>
                       <span class="portal-device-row__content">
                         <span class="portal-device-row__icon" v-html="categoryIcon(entry.item.category)"></span>
@@ -356,7 +359,7 @@ const BorrowPage = {
             <p>请核对姓名和手机号是否与借用时填写的一致。</p>
           </div>
 
-          <div v-else-if="returnResults.length" class="portal-return-list">
+          <transition-group v-else-if="returnResults.length" name="portal-return" tag="div" class="portal-return-list">
             <!-- 批量归还：备注一致时勾选多台统一归还；备注不同请各自单独填写归还。 -->
             <div class="portal-return-batch">
               <div class="portal-return-batch__head">
@@ -398,9 +401,21 @@ const BorrowPage = {
                 {{ returningRecordId === record.recordId ? '归还中…' : (returnSelected[record.recordId] ? '已加入批量归还' : '确认归还') }}
               </button>
             </article>
-          </div>
+          </transition-group>
         </section>
       </main>
+
+      <!-- 借还结果使用非阻塞反馈，短暂展示后自动消失并允许手动关闭。 -->
+      <transition name="portal-feedback">
+        <div v-if="actionFeedback" class="portal-feedback" :class="'portal-feedback--' + actionFeedback.type" role="status" aria-live="polite">
+          <span class="portal-feedback__mark" aria-hidden="true">{{ actionFeedback.type === 'success' ? '✓' : actionFeedback.type === 'warning' ? '!' : '×' }}</span>
+          <span class="portal-feedback__copy">
+            <strong>{{ actionFeedback.title }}</strong>
+            <small v-if="actionFeedback.detail">{{ actionFeedback.detail }}</small>
+          </span>
+          <button class="portal-feedback__close" type="button" aria-label="关闭提示" @click="clearActionFeedback">×</button>
+        </div>
+      </transition>
 
       <div v-if="showBorrowForm && device" class="modal-overlay" @click.self="showBorrowForm = false">
         <div class="modal">
@@ -492,7 +507,7 @@ const BorrowPage = {
           <button class="btn btn--primary btn--full btn--lg" @click="openBatchBorrowForm">统一填写信息并借用</button>
         </div>
         <button class="portal-cart__bar" @click="showBorrowCart = !showBorrowCart" :aria-expanded="showBorrowCart ? 'true' : 'false'">
-          <span>已选 {{ borrowCart.length }} 台设备待借用</span>
+          <span><transition name="portal-cart-count" mode="out-in"><span :key="borrowCart.length">已选 {{ borrowCart.length }} 台设备待借用</span></transition></span>
           <strong>{{ showBorrowCart ? '收起' : '统一填写借用 ›' }}</strong>
         </button>
       </div>
@@ -595,6 +610,22 @@ const BorrowPage = {
     const borrowCart = Vue.reactive([]);
     const showBorrowCart = Vue.ref(false);
     const showBatchBorrowForm = Vue.ref(false);
+    // 借还成功提示只保存在当前页面，并在组件卸载时清理自动消失计时器。
+    const actionFeedback = Vue.ref(null);
+    let feedbackTimerId = null;
+
+    // 统一管理借还结果反馈，避免使用阻塞式系统弹窗打断用户浏览。
+    function clearActionFeedback() {
+      if (feedbackTimerId !== null) window.clearTimeout(feedbackTimerId);
+      feedbackTimerId = null;
+      actionFeedback.value = null;
+    }
+
+    function showActionFeedback(title, detail = '', type = 'success') {
+      clearActionFeedback();
+      actionFeedback.value = { title, detail, type };
+      feedbackTimerId = window.setTimeout(clearActionFeedback, 4200);
+    }
 
     function isInCart(deviceId) {
       return borrowCart.some(item => item.id === deviceId);
@@ -815,15 +846,16 @@ const BorrowPage = {
           deviceIds: borrowCart.map(item => item.id),
           ...form
         });
+        const borrowedCount = res.data?.borrowed?.length || 0;
+        const conflictNames = (res.data?.conflicts || []).map(item => item.deviceName).filter(Boolean);
         if (res.success) {
-          const conflictNames = (res.data?.conflicts || []).map(item => item.deviceName).filter(Boolean);
-          const message = conflictNames.length
-            ? res.message + '：' + conflictNames.join('、')
-            : res.message;
-          alert(message);
+          showActionFeedback(
+            borrowedCount + ' 台设备已出舱',
+            conflictNames.length ? '暂时无法借用：' + conflictNames.join('、') : '请按约定时间归还设备。',
+            conflictNames.length ? 'warning' : 'success'
+          );
         } else {
-          const conflictNames = (res.data?.conflicts || []).map(item => item.deviceName).filter(Boolean);
-          alert((conflictNames.length ? res.message + '：' + conflictNames.join('、') : res.message) || '批量借用失败');
+          showActionFeedback('批量借用暂未完成', conflictNames.length ? '无法借用：' + conflictNames.join('、') : (res.message || '请稍后重试'), 'error');
         }
         clearBorrowCart();
         resetBorrowForm();
@@ -850,14 +882,14 @@ const BorrowPage = {
         if (res.success) {
           showBorrowForm.value = false;
           resetBorrowForm();
-          alert('借用成功，请按约定时间归还设备。');
+          showActionFeedback('设备已出舱', '请按约定时间归还设备。');
           await loadDevice(selectedDeviceId.value);
           await loadAvailableDevices();
         } else {
-          alert(res.message || '借用失败');
+          showActionFeedback('借用暂未完成', res.message || '请稍后重试', 'error');
         }
       } catch (e) {
-        alert('网络错误，请重试');
+        showActionFeedback('借用暂未完成', '网络错误，请重试。', 'error');
       } finally {
         submitting.value = false;
       }
@@ -907,12 +939,12 @@ const BorrowPage = {
           delete returnSelected[record.recordId];
           returnSearched.value = true;
           await loadAvailableDevices();
-          alert('归还成功，谢谢配合。');
+          showActionFeedback('设备已归舱', '谢谢配合。');
         } else {
-          alert(res.message || '归还失败');
+          showActionFeedback('归还暂未完成', res.message || '请稍后重试', 'error');
         }
       } catch (e) {
-        alert('网络错误，请重试');
+        showActionFeedback('归还暂未完成', '网络错误，请重试。', 'error');
       } finally {
         returningRecordId.value = '';
       }
@@ -939,10 +971,16 @@ const BorrowPage = {
           returnToken: returnToken.value,
           notes: batchReturnNotes.value
         });
+        const returnedCount = res.data?.returned?.length || 0;
+        const conflictNames = (res.data?.conflicts || []).map(item => item.deviceName).filter(Boolean);
         if (res.success) {
-          alert(res.message);
+          showActionFeedback(
+            returnedCount + ' 台设备已归舱',
+            conflictNames.length ? '暂时无法归还：' + conflictNames.join('、') : '归还记录已更新。',
+            conflictNames.length ? 'warning' : 'success'
+          );
         } else {
-          alert(res.message || '批量归还失败');
+          showActionFeedback('批量归还暂未完成', conflictNames.length ? '无法归还：' + conflictNames.join('、') : (res.message || '请稍后重试'), 'error');
         }
         // 清空选择与统一备注，并重新查询待归还列表。
         for (const record of returnResults.value) {
@@ -954,7 +992,7 @@ const BorrowPage = {
         batchReturnNotes.value = '';
         await lookupReturns();
       } catch (e) {
-        alert('网络错误，请重试');
+        showActionFeedback('归还暂未完成', '网络错误，请重试。', 'error');
       } finally {
         submitting.value = false;
       }
@@ -1000,6 +1038,7 @@ const BorrowPage = {
     Vue.onBeforeUnmount(() => {
       borrowFireworksUnmounted = true;
       destroyBorrowFireworks();
+      clearActionFeedback();
       window.removeEventListener('popstate', handlePopState);
       window.removeEventListener('resize', updateWaterfallColumnCount);
     });
@@ -1012,7 +1051,8 @@ const BorrowPage = {
       deviceStatusText, deviceStatusClass, isMobileDetailLayout, openDevice, closeDevice, finishCloseDevice, switchMode, doBorrow,
       lookupReturns, doReturn, formatDate, categoryIcon, categoryColorClass, siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping,
       MAX_BATCH_BORROW, borrowCart, showBorrowCart, showBatchBorrowForm, isInCart, toggleCartDevice, clearBorrowCart, openBatchBorrowForm, doBatchBorrow,
-      returnSelected, batchReturnNotes, returnSelectedCount, toggleReturnSelect, toggleSelectAllReturns, doBatchReturn
+      returnSelected, batchReturnNotes, returnSelectedCount, toggleReturnSelect, toggleSelectAllReturns, doBatchReturn,
+      actionFeedback, clearActionFeedback
     };
   }
 };

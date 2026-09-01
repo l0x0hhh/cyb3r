@@ -825,6 +825,36 @@ test('hitokoto footer uses an accessible reduced-motion-aware typewriter effect'
   assert.match(document, /prefers-reduced-motion:\s*reduce[\s\S]*?\.page-footer__hitokoto-cursor/);
 });
 
+// 用户端互动反馈契约：设备舱状态、借还反馈和归还列表过渡必须属于 BorrowPage。
+test('borrow portal provides non-blocking equipment interaction feedback', () => {
+  assert.match(borrowPageSource, /class="portal-feedback"/);
+  assert.match(borrowPageSource, /actionFeedback/);
+  assert.match(borrowPageSource, /showActionFeedback/);
+  assert.match(borrowPageSource, /<transition-group[^>]*name="portal-return"/);
+
+  const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
+  assert.match(document, /\.portal-device-row--selected\s*\{/);
+  assert.match(document, /\.portal-feedback\s*\{/);
+  assert.match(document, /\.portal-return-move/);
+});
+
+// 新增反馈计时器必须在用户端组件卸载时清理，且减少动态效果时不保留新增动画。
+test('borrow portal cleans up feedback timers and disables new motion when requested', () => {
+  assert.match(borrowPageSource, /feedbackTimerId/);
+  assert.match(borrowPageSource, /window\.clearTimeout\(feedbackTimerId\)/);
+  assert.match(borrowPageSource, /Vue\.onBeforeUnmount\([\s\S]*?clearActionFeedback/);
+
+  const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
+  assert.match(document, /prefers-reduced-motion:\s*reduce[\s\S]*?\.portal-feedback/);
+  assert.match(document, /prefers-reduced-motion:\s*reduce[\s\S]*?\.portal-detail__scan/);
+});
+
+// 用户反馈契约：顶部不重复展示列表数量，筛选结果数量仍保留在列表标题旁。
+test('borrow portal avoids duplicating the filtered device count in the header', () => {
+  assert.doesNotMatch(borrowPageSource, /class="portal-signal"/);
+  assert.match(borrowPageSource, /class="portal-count"/);
+});
+
 // 批量借用契约：多台设备共用一份借用信息，一次提交；清单与浮层样式存在。
 test('portal supports batch borrowing with a shared borrow cart', () => {
   assert.match(borrowPageSource, /\/api\/records\/borrow-batch/);
