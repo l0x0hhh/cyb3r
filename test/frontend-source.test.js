@@ -824,3 +824,56 @@ test('hitokoto footer uses an accessible reduced-motion-aware typewriter effect'
   assert.match(document, /@keyframes hitokoto-cursor-blink/);
   assert.match(document, /prefers-reduced-motion:\s*reduce[\s\S]*?\.page-footer__hitokoto-cursor/);
 });
+
+// 批量借用契约：多台设备共用一份借用信息，一次提交；清单与浮层样式存在。
+test('portal supports batch borrowing with a shared borrow cart', () => {
+  assert.match(borrowPageSource, /\/api\/records\/borrow-batch/);
+  assert.match(borrowPageSource, /borrowCart/);
+  assert.match(borrowPageSource, /加入借用/);
+  assert.match(borrowPageSource, /统一填写信息并借用/);
+  assert.match(borrowPageSource, /MAX_BATCH_BORROW\s*=\s*10/);
+
+  // setup 的 return 必须暴露批量借用状态与函数，否则模板渲染报错导致白屏。
+  const setupReturn = borrowPageSource.slice(borrowPageSource.indexOf('return {'));
+  assert.match(setupReturn, /\bMAX_BATCH_BORROW, borrowCart, showBorrowCart, showBatchBorrowForm, isInCart, toggleCartDevice, clearBorrowCart, openBatchBorrowForm, doBatchBorrow\b/);
+
+  const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
+  assert.match(document, /\.portal-cart\s*\{/);
+  assert.match(document, /\.portal-device-row__cart\s*\{/);
+  assert.match(document, /\.portal-batch-chip\s*\{/);
+});
+
+// 用户批量归还契约：勾选多台 + 统一备注一次归还，并保留单台各自备注归还。
+test('portal return page supports batch return with a shared note', () => {
+  assert.match(borrowPageSource, /\/api\/records\/return-batch/);
+  assert.match(borrowPageSource, /returnSelected/);
+  assert.match(borrowPageSource, /batchReturnNotes/);
+  assert.match(borrowPageSource, /批量归还所选/);
+  assert.match(borrowPageSource, /doBatchReturn/);
+  assert.match(borrowPageSource, /toggleSelectAllReturns/);
+  // 勾选进批量的设备：单台归还备注与确认归还按钮置灰，避免数量与状态冲突。
+  assert.match(borrowPageSource, /:disabled="!!returnSelected\[record\.recordId\]"/);
+  assert.match(borrowPageSource, /已加入批量归还/);
+
+  const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
+  assert.match(document, /\.portal-return-batch\s*\{/);
+  assert.match(document, /\.portal-return-card__check\s*\{/);
+});
+
+// 管理员批量归还契约：勾选当前借出记录统一备注强制归还，后端只写一条汇总日志。
+test('administrator supports batch force-return of active records', () => {
+  const adminSource = source.slice(source.indexOf('const AdminPage'));
+  assert.match(adminSource, /\/api\/records\/force-return-batch/);
+  assert.match(adminSource, /selectedActiveRecordIds/);
+  assert.match(adminSource, /openBatchForceReturn/);
+  assert.match(adminSource, /submitBatchForceReturn/);
+  assert.match(adminSource, /批量归还（\{\{ selectedActiveRecordIds\.length \}\}）/);
+  // 勾选进批量的记录：单台操作按钮置灰，单独归还后同步移除勾选。
+  assert.match(adminSource, /:disabled="selectedActiveRecordIds\.includes\(rec\.id\)"/);
+  assert.match(adminSource, /已选入批量/);
+});
+
+// 邮件模板契约：批量设备清单由既有 {{deviceName}}/{{deviceModel}} 字段渲染，不新增变量。
+test('email template editor does not add a separate batch device list variable', () => {
+  assert.doesNotMatch(source, /deviceList/);
+});

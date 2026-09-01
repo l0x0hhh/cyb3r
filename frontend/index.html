@@ -202,6 +202,15 @@
   .portal-device-row__content span { margin-top: 4px; color: var(--ink-soft); font-size: 12.5px; }
   .portal-device-row__content small { margin-top: 10px; color: var(--text-soft); font-size: 11.5px; }
   .portal-device-row__content small::before { content: '⌖'; margin-right: 4px; color: var(--brand-deep); }
+  /* 批量借用：设备卡片上的“加入借用”按钮，点击不触发卡片跳转。 */
+  .portal-device-row__cart {
+    margin: 9px 12px 12px; padding: 8px 0; display: flex; align-items: center; justify-content: center;
+    border: 1px solid rgba(0,128,160,.3); border-radius: 10px; background: transparent;
+    color: var(--brand-deep); font-size: 12.5px; font-weight: 700; cursor: pointer;
+    transition: background .2s, color .2s, border-color .2s;
+  }
+  .portal-device-row__cart:hover { background: rgba(0,128,160,.08); }
+  .portal-device-row__cart--active { background: var(--moss-bg); border-color: transparent; color: var(--moss); }
   .portal-media-image { opacity: 0; filter: blur(15px); transform: scale(1.03); transform-origin: center; transition: opacity .3s ease, filter .6s ease, transform .6s ease; }
   .portal-media-image.is-loaded { opacity: 1; filter: blur(0); transform: scale(1); }
   .portal-back { margin-bottom: 14px; padding: 8px 0; color: var(--ink-soft); background: transparent; font-size: 13px; font-weight: 700; }
@@ -241,13 +250,21 @@
   .portal-lookup .btn { margin-top: 18px; }
   .portal-return-list { display: flex; flex-direction: column; gap: 14px; margin-top: 20px; }
   .portal-return-card { padding: 18px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
-  .portal-return-card__top { display: grid; grid-template-columns: 96px 1fr; gap: 14px; margin-bottom: 16px; }
+  .portal-return-card__top { display: grid; grid-template-columns: 96px 1fr auto; gap: 14px; margin-bottom: 16px; align-items: start; }
   .portal-return-card__media { aspect-ratio: 4 / 3; overflow: hidden; background: #f0ece4; border-radius: var(--radius-sm); }
   .portal-return-card__media img { width: 100%; height: 100%; display: block; object-fit: cover; }
   .portal-return-card__content h3 { font-family: var(--serif); font-size: 18px; }
   .portal-return-card__content p { margin-top: 2px; color: var(--ink-soft); font-size: 13px; }
   .portal-return-card__content small { display: block; margin-top: 10px; color: var(--text-soft); font-size: 11px; }
   .portal-return-card .btn { margin-top: 14px; }
+  /* 批量归还：勾选、全选与统一备注区。 */
+  .portal-return-batch { display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--paper-2); border: 1px dashed var(--line); border-radius: var(--radius); }
+  .portal-return-batch__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .portal-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-soft); cursor: pointer; }
+  .portal-check input, .portal-return-card__check input { width: 16px; height: 16px; accent-color: var(--brand-deep); cursor: pointer; }
+  .portal-return-batch__count { font-size: 13px; color: var(--ink-soft); }
+  .portal-return-card__check { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; cursor: pointer; }
+  .portal-return-card--selected { border-color: var(--brand-deep); box-shadow: 0 0 0 2px rgba(0,128,160,.14); }
   .portal-image-placeholder { width: 100%; height: 100%; min-height: 150px; display: flex; align-items: center; justify-content: center; color: var(--text-soft); background: #f0ece4; font-size: 13px; }
   .portal-device-row__media .portal-image-placeholder { position: absolute; inset: 0; min-height: 0; }
   .portal-image-placeholder--small { min-height: 100%; font-size: 11px; }
@@ -382,6 +399,46 @@
   .modal-tip strong { color: var(--ink); }
   .modal-footer { display: flex; gap: 10px; margin-top: 22px; }
   .modal-footer .btn { flex: 1; }
+
+  /* 批量借用：详情页次要按钮与弹窗内设备清单。 */
+  .portal-detail__cart { margin-top: 10px; }
+  .portal-detail__cart--active { color: var(--moss); border-color: var(--moss); }
+  .portal-batch-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .portal-batch-chip {
+    display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 11px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--paper-2);
+    font-size: 12.5px; font-weight: 600; color: var(--ink);
+  }
+  .portal-batch-chip small { color: var(--text-soft); font-weight: 400; }
+
+  /* 批量借用：底部浮动借用清单，介于粒子层(90)与弹窗层(100)之间。 */
+  .portal-cart {
+    position: fixed; left: 50%; bottom: 16px; z-index: 95;
+    width: min(560px, calc(100vw - 28px)); transform: translateX(-50%);
+    display: flex; flex-direction: column; gap: 10px; pointer-events: none;
+  }
+  .portal-cart__bar {
+    pointer-events: auto; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 13px 18px; border: 1px solid rgba(0,128,160,.28); border-radius: 14px;
+    background: var(--card); box-shadow: 0 6px 24px rgba(26,26,46,.18);
+    font-size: 13.5px; color: var(--ink); cursor: pointer;
+  }
+  .portal-cart__bar strong { color: var(--brand-deep); font-weight: 700; }
+  .portal-cart__panel {
+    pointer-events: auto; padding: 16px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 10px 32px rgba(26,26,46,.2);
+  }
+  .portal-cart__panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .portal-cart__panel-header strong { font-family: var(--serif); font-size: 16px; }
+  .portal-cart__clear { color: var(--text-soft); font-size: 12.5px; padding: 4px 6px; }
+  .portal-cart__clear:hover { color: #9f2f24; }
+  .portal-cart__items { list-style: none; margin: 0 0 14px; padding: 0; max-height: 34vh; overflow-y: auto; }
+  .portal-cart__items li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 2px; border-bottom: 1px solid var(--line); }
+  .portal-cart__name { min-width: 0; font-size: 13.5px; font-weight: 600; }
+  .portal-cart__name small { display: block; color: var(--text-soft); font-size: 11.5px; font-weight: 400; margin-top: 2px; }
+  .portal-cart__remove { flex: none; width: 26px; height: 26px; border-radius: 50%; color: var(--text-soft); background: var(--paper-2); font-size: 12px; }
+  .portal-cart__remove:hover { color: #9f2f24; background: #fff0ed; }
+  .portal-cart__panel .btn { margin-top: 4px; }
 
   .form-group { display: flex; flex-direction: column; gap: 6px; }
   .form-group label { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
@@ -826,7 +883,11 @@
   .record-card--active { border-left-color: var(--clay); }
   .record-card--returned { border-left-color: var(--moss); opacity: .9; }
   .record-card--archived { border-left-color: var(--text-soft); opacity: .88; }
+  .record-card--selected { border-color: var(--brand-deep); box-shadow: 0 0 0 2px rgba(0,128,160,.14); }
   .record-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .record-card-header .record-device { margin-right: auto; }
+  .record-check { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+  .record-check input { width: 16px; height: 16px; accent-color: var(--brand-deep); cursor: pointer; }
   .record-device { display: flex; align-items: center; gap: 10px; }
   .record-device-icon { font-size: 22px; }
   .record-device-name { font-family: var(--serif); font-weight: 600; font-size: 16px; }

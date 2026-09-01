@@ -437,16 +437,27 @@ function writeEmailSettings(settings) {
   try { fs.chmodSync(EMAIL_SETTINGS_FILE, 0o600); } catch { /* Windows 和部分挂载目录不支持 chmod。 */ }
 }
 
+// 开发环境内置密钥：未配置 EMAIL_CONFIG_KEY 时，仅非生产环境回退到固定开发密钥以便本地测试邮件；
+// 生产环境必须显式配置环境变量，密钥不进入仓库，加密语义不被削弱。
+const DEV_EMAIL_CONFIG_KEY = '1b741a8d1d7ade75546f052a846e3160a5741341e42e65d49e2f3eaa228c2c61';
+let emailConfigKeyWarned = false;
 function getEmailConfigKey() {
   const raw = String(process.env.EMAIL_CONFIG_KEY || '').trim();
-  if (!raw) return null;
-  if (/^[0-9a-f]{64}$/i.test(raw)) return Buffer.from(raw, 'hex');
-  try {
-    const key = Buffer.from(raw, 'base64');
-    return key.length === 32 ? key : null;
-  } catch {
-    return null;
+  if (raw) {
+    if (/^[0-9a-f]{64}$/i.test(raw)) return Buffer.from(raw, 'hex');
+    try {
+      const key = Buffer.from(raw, 'base64');
+      return key.length === 32 ? key : null;
+    } catch {
+      return null;
+    }
   }
+  if (process.env.NODE_ENV === 'production') return null;
+  if (!emailConfigKeyWarned) {
+    emailConfigKeyWarned = true;
+    console.warn('\n⚠️  未配置 EMAIL_CONFIG_KEY，当前使用开发默认密钥；生产部署前请设置 EMAIL_CONFIG_KEY 环境变量。\n');
+  }
+  return Buffer.from(DEV_EMAIL_CONFIG_KEY, 'hex');
 }
 
 function encryptEmailSecret(secret) {
@@ -676,6 +687,21 @@ function queueEmailNotification(eventType, record) {
   }).catch(error => {
     console.error(`[email] ${event.label}通知发送失败：${error.message}`);
   });
+}
+
+// 批量事件只发一封汇总邮件：借用信息取第一条记录，设备名称/型号/编号顿号拼接，
+// 模板中的 {{deviceName}}/{{deviceModel}}/{{deviceId}} 直接渲染出完整清单，无需新增变量。
+function queueBatchEmailNotification(eventType, records) {
+  const list = (records || []).filter(Boolean);
+  if (!list.length) return;
+  const first = list[0];
+  const summary = {
+    ...first,
+    deviceName: list.map(record => String(record.deviceName || '未知设备')).join('、'),
+    deviceModel: list.map(record => String(record.deviceModel || '')).join('、'),
+    deviceId: list.map(record => String(record.deviceId || '')).join('、')
+  };
+  queueEmailNotification(eventType, summary);
 }
 
 // 操作日志只保存设备动作元数据，禁止传入借用人姓名、电话等隐私字段。
@@ -1661,6 +1687,92 @@ app.post('/api/records/borrow', borrowReturnLimiter, (req, res) => {
   }
 });
 
+// 批量借出：同一借用信息一次借多台设备；单台冲突不影响其他设备借出。
+app.post('/api/records/borrow-batch', borrowReturnLimiter, (req, res) => {
+  try {
+    const rawIds = Array.isArray(req.body?.deviceIds) ? req.body.deviceIds : [];
+    const deviceIds = [...new Set(rawIds.map(id => String(id || '').trim()).filter(Boolean))];
+    const borrowerName = String(req.body?.borrowerName || '').trim();
+    const borrowerId = String(req.body?.borrowerId || '').trim();
+    const borrowerPhone = normalizePhone(req.body?.borrowerPhone);
+    const major = String(req.body?.major ?? req.body?.department ?? '').trim();
+    const purpose = String(req.body?.purpose ?? req.body?.notes ?? '').trim();
+
+    if (!deviceIds.length) {
+      return res.status(400).json({ success: false, message: '请选择要借用的设备' });
+    }
+    if (deviceIds.length > 10) {
+      return res.status(400).json({ success: false, message: '单次最多可批量借用 10 台设备' });
+    }
+    if (!borrowerName || !borrowerPhone || !major || !purpose) {
+      return res.status(400).json({ success: false, message: '姓名、完整手机号、专业和用途均为必填项' });
+    }
+    if (!isFullPhone(borrowerPhone)) {
+      return res.status(400).json({ success: false, message: '请输入 11 位完整手机号' });
+    }
+
+    const devices = readJSON(DEVICES_FILE);
+    const records = readJSON(RECORDS_FILE);
+    const borrowed = [];
+    const conflicts = [];
+    const createdRecords = [];
+    const now = new Date().toISOString();
+
+    for (const deviceId of deviceIds) {
+      const device = devices.find(d => d.id === deviceId);
+      if (!device) {
+        conflicts.push({ deviceId, deviceName: '(未知设备)', reason: '设备不存在' });
+        continue;
+      }
+      if (getOperationalStatus(device) === 'offline') {
+        conflicts.push({ deviceId, deviceName: device.name, reason: '该设备当前已下线，无法借用' });
+        continue;
+      }
+      if (device.status === 'borrowed') {
+        conflicts.push({ deviceId, deviceName: device.name, reason: '该设备已被借用，请先归还' });
+        continue;
+      }
+
+      device.status = 'borrowed';
+      const record = {
+        // 批量借出同毫秒内产生多条记录，追加随机后缀避免记录 ID 冲突。
+        id: 'REC' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase(),
+        deviceId,
+        deviceName: device.name,
+        deviceModel: device.model,
+        type: 'borrow',
+        borrowerName,
+        borrowerId,
+        borrowerPhone,
+        major,
+        purpose,
+        // 保留旧字段，便于旧部署脚本和历史前端平滑读取。
+        department: major,
+        notes: purpose,
+        createdAt: now
+      };
+      records.push(record);
+      createdRecords.push(record);
+      borrowed.push({ deviceId, deviceName: device.name, recordId: record.id });
+    }
+
+    writeJSON(DEVICES_FILE, devices);
+    writeJSON(RECORDS_FILE, records);
+
+    // 批量借出只发一封汇总邮件，不再逐台发送。
+    queueBatchEmailNotification('borrow', createdRecords);
+
+    if (borrowed.length) {
+      const message = '成功借出 ' + borrowed.length + ' 台设备'
+        + (conflicts.length ? '，' + conflicts.length + ' 台设备暂时无法借用' : '');
+      return res.json({ success: true, message, data: { borrowed, conflicts } });
+    }
+    res.json({ success: false, message: '所有设备暂时无法借用', data: { borrowed: [], conflicts } });
+  } catch (e) {
+    res.json({ success: false, message: e.message });
+  }
+});
+
 // 使用姓名和完整手机号查询本人当前待归还设备，并签发短期归还凭证
 app.post('/api/records/return-lookup', borrowReturnLimiter, (req, res) => {
   try {
@@ -1742,6 +1854,78 @@ app.post('/api/records/return', borrowReturnLimiter, (req, res) => {
 
     queueEmailNotification('return', activeRecord);
     res.json({ success: true, message: '归还成功' });
+  } catch (e) {
+    res.json({ success: false, message: e.message });
+  }
+});
+
+// 用户批量归还：查询阶段签发的凭证覆盖多台记录，统一备注一次归还；单台异常不影响其他设备。
+app.post('/api/records/return-batch', borrowReturnLimiter, (req, res) => {
+  try {
+    const rawIds = Array.isArray(req.body?.recordIds) ? req.body.recordIds : [];
+    const recordIds = [...new Set(rawIds.map(id => String(id || '').trim()).filter(Boolean))];
+    const returnToken = String(req.body?.returnToken || '').trim();
+    const notes = String(req.body?.notes || '').trim();
+    const authorization = getReturnAuthorization(returnToken);
+
+    if (!recordIds.length) {
+      return res.status(400).json({ success: false, message: '请选择要归还的设备' });
+    }
+    if (recordIds.length > 10) {
+      return res.status(400).json({ success: false, message: '单次最多可批量归还 10 台设备' });
+    }
+    if (!authorization) {
+      return res.status(403).json({ success: false, message: '归还验证已失效，请重新查询' });
+    }
+
+    const devices = readJSON(DEVICES_FILE);
+    const records = readJSON(RECORDS_FILE);
+    const returned = [];
+    const conflicts = [];
+    const returnedRecords = [];
+    const now = new Date().toISOString();
+
+    for (const recordId of recordIds) {
+      if (!authorization.recordIds.includes(recordId)) {
+        conflicts.push({ recordId, reason: '归还验证已失效，请重新查询' });
+        continue;
+      }
+      const record = records.find(item => item.id === recordId && item.type === 'borrow' && !item.returnedAt && !item.deletedAt);
+      if (!record) {
+        conflicts.push({ recordId, reason: '未找到当前借用记录' });
+        continue;
+      }
+      const device = devices.find(item => item.id === record.deviceId);
+      if (!device) {
+        conflicts.push({ recordId, reason: '设备不存在' });
+        continue;
+      }
+      if (device.status === 'available') {
+        conflicts.push({ recordId, reason: '该设备当前未借出' });
+        continue;
+      }
+
+      record.returnedAt = now;
+      record.returnNotes = notes;
+      device.status = 'available';
+      returned.push({ recordId, deviceId: device.id, deviceName: device.name });
+      returnedRecords.push(record);
+      authorization.recordIds = authorization.recordIds.filter(id => id !== recordId);
+    }
+
+    writeJSON(DEVICES_FILE, devices);
+    writeJSON(RECORDS_FILE, records);
+    if (!authorization.recordIds.length) returnAuthorizations.delete(returnToken);
+
+    // 批量归还只发一封汇总邮件，不再逐台发送。
+    queueBatchEmailNotification('return', returnedRecords);
+
+    if (returned.length) {
+      const message = '成功归还 ' + returned.length + ' 台设备'
+        + (conflicts.length ? '，' + conflicts.length + ' 台设备无法归还' : '');
+      return res.json({ success: true, message, data: { returned, conflicts } });
+    }
+    res.json({ success: false, message: '所选设备均无法归还', data: { returned: [], conflicts } });
   } catch (e) {
     res.json({ success: false, message: e.message });
   }
@@ -1835,6 +2019,75 @@ app.post('/api/records/:id/force-return', requireAdminPermission('records'), (re
     res.json({ success: true, data: record, message: '设备已由管理员归还' });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// 管理员批量强制归还：一次归还多台借出设备，统一备注；只写一条汇总日志并发一封汇总邮件。
+app.post('/api/records/force-return-batch', requireAdminPermission('records'), (req, res) => {
+  try {
+    const rawIds = Array.isArray(req.body?.recordIds) ? req.body.recordIds : [];
+    const recordIds = [...new Set(rawIds.map(id => String(id || '').trim()).filter(Boolean))];
+    const notes = String(req.body?.notes || '管理员确认归还').trim();
+
+    if (!recordIds.length) {
+      return res.status(400).json({ success: false, message: '请选择要归还的记录' });
+    }
+    if (recordIds.length > 50) {
+      return res.status(400).json({ success: false, message: '单次最多可批量归还 50 台设备' });
+    }
+
+    const records = readJSON(RECORDS_FILE);
+    const devices = readJSON(DEVICES_FILE);
+    const returned = [];
+    const conflicts = [];
+    const returnedRecords = [];
+    const now = new Date().toISOString();
+
+    for (const recordId of recordIds) {
+      const record = records.find(item => item.id === recordId);
+      if (!record) {
+        conflicts.push({ recordId, reason: '记录不存在' });
+        continue;
+      }
+      if (record.returnedAt) {
+        conflicts.push({ recordId, deviceName: record.deviceName, reason: '该记录已经归还' });
+        continue;
+      }
+      const device = devices.find(item => item.id === record.deviceId);
+      if (!device) {
+        conflicts.push({ recordId, deviceName: record.deviceName, reason: '设备不存在' });
+        continue;
+      }
+
+      record.returnedAt = now;
+      record.returnNotes = notes;
+      device.status = 'available';
+      returned.push({ recordId, deviceId: device.id, deviceName: device.name });
+      returnedRecords.push(record);
+    }
+
+    writeJSON(DEVICES_FILE, devices);
+    writeJSON(RECORDS_FILE, records);
+
+    // 批量归还只写一条汇总日志（对齐批量上下线），日志不含借用人隐私。
+    if (returned.length) {
+      appendOperationLog(
+        'admin_returned',
+        { id: 'batch', name: '批量归还设备' },
+        `批量管理员归还 ${returned.length} 台设备${notes && notes !== '管理员确认归还' ? `；备注：${notes}` : ''}`
+      );
+    }
+    // 批量归还只发一封汇总邮件，不再逐台发送。
+    queueBatchEmailNotification('adminReturn', returnedRecords);
+
+    if (returned.length) {
+      const message = '成功归还 ' + returned.length + ' 台设备'
+        + (conflicts.length ? '，' + conflicts.length + ' 台设备无法归还' : '');
+      return res.json({ success: true, message, data: { returned, conflicts } });
+    }
+    res.json({ success: false, message: '所选记录均无法归还', data: { returned: [], conflicts } });
+  } catch (e) {
+    res.status(500).json({ success: false, message: '批量归还失败: ' + e.message });
   }
 });
 

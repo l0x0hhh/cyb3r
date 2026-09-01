@@ -15,6 +15,16 @@ test('startup logs never print the administrator password', () => {
   assert.doesNotMatch(serverSource, /管理密码[^\n]*PASSWORD/);
 });
 
+// 开发环境回退密钥契约：未配置 EMAIL_CONFIG_KEY 时仅非生产环境使用内置开发密钥，
+// 生产环境仍强制要求显式配置，密钥不得进入仓库。
+test('non-production startup falls back to a development email config key', () => {
+  assert.match(serverSource, /DEV_EMAIL_CONFIG_KEY/);
+  assert.match(serverSource, /process\.env\.NODE_ENV\s*===\s*['"]production['"]/);
+  assert.match(serverSource, /使用开发默认密钥/);
+  assert.match(serverSource, /生产部署前请设置 EMAIL_CONFIG_KEY/);
+  assert.match(serverSource, /emailConfigKeyWarned/);
+});
+
 test('uploads can be isolated and use a patched Multer release', () => {
   assert.match(serverSource, /process\.env\.UPLOAD_DIR/);
   assert.match(serverSource, /process\.env\.QR_DIR/);

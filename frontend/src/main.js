@@ -268,7 +268,12 @@ const BorrowPage = {
                     <button class="btn btn--success btn--full btn--lg" @click="switchMode('return')">前往还设备</button>
                   </div>
 
-                  <button v-else class="btn btn--primary btn--full btn--lg" @click="showBorrowForm = true">填写信息并借用</button>
+                  <template v-else>
+                    <button class="btn btn--primary btn--full btn--lg" @click="showBorrowForm = true">填写信息并借用</button>
+                    <button class="btn btn--ghost btn--full btn--lg portal-detail__cart" :class="{ 'portal-detail__cart--active': isInCart(device.id) }" @click="toggleCartDevice(device)">
+                      {{ isInCart(device.id) ? '已加入借用清单（点击移除）' : '加入借用清单' }}
+                    </button>
+                  </template>
                 </div>
               </article>
             </div>
@@ -313,6 +318,13 @@ const BorrowPage = {
                         <small>{{ entry.item.location || '位置未填写' }}</small>
                       </span>
                     </a>
+                    <button
+                      v-if="entry.item.status === 'available' && entry.item.operationalStatus !== 'offline'"
+                      class="portal-device-row__cart"
+                      :class="{ 'portal-device-row__cart--active': isInCart(entry.item.id) }"
+                      :aria-pressed="isInCart(entry.item.id)"
+                      @click.stop="toggleCartDevice(entry.item)"
+                    >{{ isInCart(entry.item.id) ? '已加入 ✓' : '＋ 加入借用' }}</button>
                   </article>
                 </div>
               </div>
@@ -345,7 +357,25 @@ const BorrowPage = {
           </div>
 
           <div v-else-if="returnResults.length" class="portal-return-list">
-            <article v-for="record in returnResults" :key="record.recordId" class="portal-return-card">
+            <!-- 批量归还：备注一致时勾选多台统一归还；备注不同请各自单独填写归还。 -->
+            <div class="portal-return-batch">
+              <div class="portal-return-batch__head">
+                <label class="portal-check">
+                  <input type="checkbox" :checked="returnSelectedCount === returnResults.length && returnResults.length > 0" @change="toggleSelectAllReturns" />
+                  <span>全选</span>
+                </label>
+                <span class="portal-return-batch__count">已选 {{ returnSelectedCount }} 台</span>
+              </div>
+              <div v-if="returnSelectedCount" class="form-group">
+                <label>统一归还备注（可选）</label>
+                <input v-model.trim="batchReturnNotes" class="input" placeholder="所选设备共用此备注；各台备注不同请单独归还" />
+              </div>
+              <button v-if="returnSelectedCount" class="btn btn--success btn--full btn--lg" :disabled="submitting || !returnToken" @click="doBatchReturn">
+                {{ submitting ? '归还中…' : '批量归还所选 ' + returnSelectedCount + ' 台' }}
+              </button>
+            </div>
+
+            <article v-for="record in returnResults" :key="record.recordId" class="portal-return-card" :class="{ 'portal-return-card--selected': returnSelected[record.recordId] }">
               <div class="portal-return-card__top">
                 <div class="portal-return-card__media">
                   <img v-if="hasImage(record, record.imageThumb || record.image)" :src="record.imageThumb || record.image" :alt="record.deviceName" class="portal-media-image" :class="{ 'is-loaded': isImageLoaded(record.imageThumb || record.image) }" loading="lazy" decoding="async" @load="markImageLoaded(record.imageThumb || record.image, $event)" @error="markImageFailed(record.imageThumb || record.image)" />
@@ -356,13 +386,16 @@ const BorrowPage = {
                   <p>{{ record.deviceModel }}</p>
                   <small>借用时间：{{ formatDate(record.borrowedAt) }}</small>
                 </div>
+                <label class="portal-return-card__check">
+                  <input type="checkbox" :checked="!!returnSelected[record.recordId]" @change="toggleReturnSelect(record.recordId)" :aria-label="'选择归还 ' + record.deviceName" />
+                </label>
               </div>
               <div class="form-group">
                 <label>归还备注（可选）</label>
-                <textarea v-model="returnNotes[record.recordId]" class="input textarea" rows="2" placeholder="可填写设备当前状况"></textarea>
+                <textarea v-model="returnNotes[record.recordId]" class="input textarea" rows="2" placeholder="可填写设备当前状况" :disabled="!!returnSelected[record.recordId]" :class="{ 'input--disabled': returnSelected[record.recordId] }"></textarea>
               </div>
-              <button class="btn btn--success btn--full btn--lg" :disabled="returningRecordId === record.recordId" @click="doReturn(record)">
-                {{ returningRecordId === record.recordId ? '归还中…' : '确认归还' }}
+              <button class="btn btn--success btn--full btn--lg" :disabled="returningRecordId === record.recordId || !!returnSelected[record.recordId]" @click="doReturn(record)">
+                {{ returningRecordId === record.recordId ? '归还中…' : (returnSelected[record.recordId] ? '已加入批量归还' : '确认归还') }}
               </button>
             </article>
           </div>
@@ -402,6 +435,66 @@ const BorrowPage = {
             <button class="btn btn--primary btn--lg" :disabled="submitting" @click="doBorrow">{{ submitting ? '提交中…' : '确认借用' }}</button>
           </div>
         </div>
+      </div>
+
+      <!-- 批量借用弹窗：多台设备共用一份借用信息，只填一次表单。 -->
+      <div v-if="showBatchBorrowForm && borrowCart.length" class="modal-overlay portal-batch-modal" @click.self="showBatchBorrowForm = false">
+        <div class="modal">
+          <div class="modal-header">
+            <div><h2>批量借用 {{ borrowCart.length }} 台设备</h2><p class="modal-tip">以下设备将使用同一份借用信息，请填写真实信息。</p></div>
+            <button class="modal-close" aria-label="关闭" @click="showBatchBorrowForm = false">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="portal-batch-list">
+              <span v-for="item in borrowCart" :key="item.id" class="portal-batch-chip">{{ item.name }}<small>{{ item.model }}</small></span>
+            </div>
+            <div class="form-group">
+              <label>姓名 <span class="required">*</span></label>
+              <input v-model.trim="form.borrowerName" class="input" autocomplete="name" placeholder="请输入你的姓名" />
+            </div>
+            <div class="form-group">
+              <label>学号 / 工号</label>
+              <input v-model.trim="form.borrowerId" class="input" placeholder="选填" />
+            </div>
+            <div class="form-group">
+              <label>完整手机号 <span class="required">*</span></label>
+              <input v-model.trim="form.borrowerPhone" class="input" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel" placeholder="请输入 11 位手机号" />
+            </div>
+            <div class="form-group">
+              <label>专业 <span class="required">*</span></label>
+              <input v-model.trim="form.major" class="input" placeholder="如：网络空间安全" />
+            </div>
+            <div class="form-group">
+              <label>用途 <span class="required">*</span></label>
+              <textarea v-model.trim="form.purpose" class="input textarea" rows="3" placeholder="请说明本次借用用途"></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn--ghost btn--lg" @click="showBatchBorrowForm = false">取消</button>
+            <button class="btn btn--primary btn--lg" :disabled="submitting" @click="doBatchBorrow">{{ submitting ? '提交中…' : '确认借用' }}</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 借用清单浮层：选中多台设备后统一填写借用信息。 -->
+      <div v-if="borrowCart.length" class="portal-cart">
+        <div v-if="showBorrowCart" class="portal-cart__panel">
+          <div class="portal-cart__panel-header">
+            <strong>借用清单（{{ borrowCart.length }}/{{ MAX_BATCH_BORROW }}）</strong>
+            <button class="portal-cart__clear" @click="clearBorrowCart">清空</button>
+          </div>
+          <ul class="portal-cart__items">
+            <li v-for="item in borrowCart" :key="item.id">
+              <span class="portal-cart__name">{{ item.name }}<small v-if="item.model">{{ item.model }}</small></span>
+              <button class="portal-cart__remove" :aria-label="'移除 ' + item.name" @click="toggleCartDevice(item)">✕</button>
+            </li>
+          </ul>
+          <button class="btn btn--primary btn--full btn--lg" @click="openBatchBorrowForm">统一填写信息并借用</button>
+        </div>
+        <button class="portal-cart__bar" @click="showBorrowCart = !showBorrowCart" :aria-expanded="showBorrowCart ? 'true' : 'false'">
+          <span>已选 {{ borrowCart.length }} 台设备待借用</span>
+          <strong>{{ showBorrowCart ? '收起' : '统一填写借用 ›' }}</strong>
+        </button>
       </div>
 
       <footer class="page-footer">
@@ -486,6 +579,10 @@ const BorrowPage = {
     const returnResults = Vue.ref([]);
     const returnToken = Vue.ref('');
     const returnNotes = Vue.reactive({});
+    // 批量归还：勾选多台 + 统一备注一次归还；备注不同走单台各自归还。
+    const returnSelected = Vue.reactive({});
+    const batchReturnNotes = Vue.ref('');
+    const returnSelectedCount = Vue.computed(() => Object.keys(returnSelected).filter(id => returnSelected[id]).length);
     const failedImages = Vue.reactive(new Set());
     const loadedImages = Vue.reactive(new Set());
     const imageRatios = Vue.reactive({});
@@ -493,6 +590,40 @@ const BorrowPage = {
       borrowerName: '', borrowerId: '', borrowerPhone: '', major: '', purpose: ''
     });
     const returnLookup = Vue.reactive({ borrowerName: '', borrowerPhone: '' });
+    // 批量借用清单：最多 10 台，借用信息只需填写一次。
+    const MAX_BATCH_BORROW = 10;
+    const borrowCart = Vue.reactive([]);
+    const showBorrowCart = Vue.ref(false);
+    const showBatchBorrowForm = Vue.ref(false);
+
+    function isInCart(deviceId) {
+      return borrowCart.some(item => item.id === deviceId);
+    }
+
+    function toggleCartDevice(device) {
+      const index = borrowCart.findIndex(item => item.id === device.id);
+      if (index >= 0) {
+        borrowCart.splice(index, 1);
+        return;
+      }
+      if (borrowCart.length >= MAX_BATCH_BORROW) {
+        alert('单次最多批量借用 ' + MAX_BATCH_BORROW + ' 台设备');
+        return;
+      }
+      borrowCart.push({ id: device.id, name: device.name, model: device.model || '' });
+    }
+
+    function clearBorrowCart() {
+      borrowCart.splice(0, borrowCart.length);
+      showBorrowCart.value = false;
+      showBatchBorrowForm.value = false;
+    }
+
+    function openBatchBorrowForm() {
+      if (!borrowCart.length) return;
+      showBorrowCart.value = false;
+      showBatchBorrowForm.value = true;
+    }
 
     function hasImage(item, source = item?.image) {
       return !!source && !failedImages.has(source);
@@ -672,6 +803,39 @@ const BorrowPage = {
       form.purpose = '';
     }
 
+    async function doBatchBorrow() {
+      if (!borrowCart.length) return;
+      if (!form.borrowerName || !/^1\d{10}$/.test(form.borrowerPhone) || !form.major || !form.purpose) {
+        alert('请完整填写姓名、11 位手机号、专业和用途');
+        return;
+      }
+      submitting.value = true;
+      try {
+        const res = await apiCall('POST', '/api/records/borrow-batch', {
+          deviceIds: borrowCart.map(item => item.id),
+          ...form
+        });
+        if (res.success) {
+          const conflictNames = (res.data?.conflicts || []).map(item => item.deviceName).filter(Boolean);
+          const message = conflictNames.length
+            ? res.message + '：' + conflictNames.join('、')
+            : res.message;
+          alert(message);
+        } else {
+          const conflictNames = (res.data?.conflicts || []).map(item => item.deviceName).filter(Boolean);
+          alert((conflictNames.length ? res.message + '：' + conflictNames.join('、') : res.message) || '批量借用失败');
+        }
+        clearBorrowCart();
+        resetBorrowForm();
+        if (selectedDeviceId.value) await loadDevice(selectedDeviceId.value);
+        await loadAvailableDevices();
+      } catch (e) {
+        alert('网络错误，请重试');
+      } finally {
+        submitting.value = false;
+      }
+    }
+
     async function doBorrow() {
       if (!form.borrowerName || !/^1\d{10}$/.test(form.borrowerPhone) || !form.major || !form.purpose) {
         alert('请完整填写姓名、11 位手机号、专业和用途');
@@ -712,6 +876,12 @@ const BorrowPage = {
           returnResults.value = res.data.records || [];
           returnToken.value = res.data.returnToken || '';
           returnSearched.value = true;
+          // 新查询后清理失效的勾选和统一备注，避免残留选择作用于其他记录。
+          const activeIds = new Set(returnResults.value.map(record => record.recordId));
+          for (const id of Object.keys(returnSelected)) {
+            if (!activeIds.has(id)) delete returnSelected[id];
+          }
+          if (!returnSelectedCount.value) batchReturnNotes.value = '';
         } else {
           alert(res.message || '查询失败');
         }
@@ -734,6 +904,7 @@ const BorrowPage = {
         if (res.success) {
           returnResults.value = returnResults.value.filter(item => item.recordId !== record.recordId);
           delete returnNotes[record.recordId];
+          delete returnSelected[record.recordId];
           returnSearched.value = true;
           await loadAvailableDevices();
           alert('归还成功，谢谢配合。');
@@ -744,6 +915,48 @@ const BorrowPage = {
         alert('网络错误，请重试');
       } finally {
         returningRecordId.value = '';
+      }
+    }
+
+    function toggleReturnSelect(recordId) {
+      returnSelected[recordId] = !returnSelected[recordId];
+    }
+
+    function toggleSelectAllReturns() {
+      const allSelected = returnSelectedCount.value === returnResults.value.length && returnResults.value.length > 0;
+      for (const record of returnResults.value) {
+        returnSelected[record.recordId] = !allSelected;
+      }
+    }
+
+    async function doBatchReturn() {
+      const ids = returnResults.value.filter(record => returnSelected[record.recordId]).map(record => record.recordId);
+      if (!ids.length || !returnToken.value) return;
+      submitting.value = true;
+      try {
+        const res = await apiCall('POST', '/api/records/return-batch', {
+          recordIds: ids,
+          returnToken: returnToken.value,
+          notes: batchReturnNotes.value
+        });
+        if (res.success) {
+          alert(res.message);
+        } else {
+          alert(res.message || '批量归还失败');
+        }
+        // 清空选择与统一备注，并重新查询待归还列表。
+        for (const record of returnResults.value) {
+          if (returnSelected[record.recordId]) {
+            delete returnSelected[record.recordId];
+            delete returnNotes[record.recordId];
+          }
+        }
+        batchReturnNotes.value = '';
+        await lookupReturns();
+      } catch (e) {
+        alert('网络错误，请重试');
+      } finally {
+        submitting.value = false;
       }
     }
 
@@ -797,7 +1010,9 @@ const BorrowPage = {
       returnResults, returnToken, returnNotes, form, returnLookup, hasImage, markImageFailed,
       markImageLoaded, isImageLoaded, imageAspectRatio, imageDisplayAspectRatio, imageDisplayPositionY, buildSrcset, detailImageHeight, detailImageAspectRatio, detailMediaStyle,
       deviceStatusText, deviceStatusClass, isMobileDetailLayout, openDevice, closeDevice, finishCloseDevice, switchMode, doBorrow,
-      lookupReturns, doReturn, formatDate, categoryIcon, categoryColorClass, siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping
+      lookupReturns, doReturn, formatDate, categoryIcon, categoryColorClass, siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping,
+      MAX_BATCH_BORROW, borrowCart, showBorrowCart, showBatchBorrowForm, isInCart, toggleCartDevice, clearBorrowCart, openBatchBorrowForm, doBatchBorrow,
+      returnSelected, batchReturnNotes, returnSelectedCount, toggleReturnSelect, toggleSelectAllReturns, doBatchReturn
     };
   }
 };
@@ -1224,6 +1439,7 @@ const AdminPage = {
         <div v-if="activeTab === 'records'" class="tab-content">
           <div class="section-header">
             <h2 class="section-title">当前借出情况</h2>
+            <button v-if="selectedActiveRecordIds.length" class="btn btn--success btn--sm" @click="openBatchForceReturn">批量归还（{{ selectedActiveRecordIds.length }}）</button>
           </div>
 
           <div v-if="activeRecords.length === 0" class="empty-state">
@@ -1232,8 +1448,11 @@ const AdminPage = {
           </div>
 
           <div v-else class="record-list">
-            <div v-for="rec in activeRecords" :key="rec.id" class="record-card record-card--active">
+            <div v-for="rec in activeRecords" :key="rec.id" class="record-card record-card--active" :class="{ 'record-card--selected': selectedActiveRecordIds.includes(rec.id) }">
               <div class="record-card-header">
+                <label class="record-check" :title="'选择归还 ' + rec.deviceName">
+                  <input type="checkbox" :checked="selectedActiveRecordIds.includes(rec.id)" @change="toggleActiveRecordSelect(rec.id)" :aria-label="'选择归还 ' + rec.deviceName" />
+                </label>
                 <div class="record-device">
                   <span class="record-device-icon">📋</span>
                   <div>
@@ -1259,8 +1478,8 @@ const AdminPage = {
                   借用时间：{{ formatDate(rec.createdAt) }}
                 </div>
                 <div class="record-card-actions">
-                  <button class="btn btn--ghost btn--xs" @click="editActiveRecord(rec)">修改借用信息</button>
-                  <button class="btn btn--success btn--xs" @click="forceReturnRecord(rec)">管理员归还</button>
+                  <button class="btn btn--ghost btn--xs" :disabled="selectedActiveRecordIds.includes(rec.id)" @click="editActiveRecord(rec)">修改借用信息</button>
+                  <button class="btn btn--success btn--xs" :disabled="selectedActiveRecordIds.includes(rec.id)" @click="forceReturnRecord(rec)">{{ selectedActiveRecordIds.includes(rec.id) ? '已选入批量' : '管理员归还' }}</button>
                 </div>
               </div>
             </div>
@@ -1527,6 +1746,28 @@ const AdminPage = {
             <button class="btn btn--lg" :class="batchOperationalStatus === 'offline' ? 'btn--danger' : 'btn--primary'" :disabled="submitting" @click="batchOperationalStatus === 'offline' ? submitBatchOffline() : submitBatchOnline()">
               {{ submitting ? '处理中...' : (batchOperationalStatus === 'offline' ? '确认下线' : '确认上线') }}
             </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 管理员批量归还：勾选多台借出记录统一备注强制归还。 -->
+      <div v-if="showBatchForceReturn" class="modal-overlay" @click.self="closeBatchForceReturn">
+        <div class="modal">
+          <div class="modal-header">
+            <div><h2>批量归还 {{ selectedActiveRecordIds.length }} 台设备</h2><p class="modal-tip">归还后设备将恢复为可借用状态。</p></div>
+            <button class="modal-close" aria-label="关闭" @click="closeBatchForceReturn">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="batch-device-summary">{{ selectedActiveRecordNames.join('、') }}</div>
+            <div v-if="batchForceReturnError" class="import-message import-message--error">{{ batchForceReturnError }}</div>
+            <div class="form-group">
+              <label>统一归还备注（可选）</label>
+              <input v-model.trim="batchReturnNotesAdmin" class="input" placeholder="所选记录共用此备注" />
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn--ghost btn--lg" @click="closeBatchForceReturn">取消</button>
+            <button class="btn btn--success btn--lg" :disabled="submitting" @click="submitBatchForceReturn">{{ submitting ? '归还中…' : '确认批量归还' }}</button>
           </div>
         </div>
       </div>
@@ -1854,6 +2095,12 @@ const AdminPage = {
       // 批量状态选择是页面临时状态，成功或关闭后清空，不影响设备持久化模型。
       const selectedDeviceIds = Vue.ref([]);
       const selectedDeviceNames = Vue.computed(() => devices.value.filter(device => selectedDeviceIds.value.includes(device.id)).map(device => device.name));
+      // 管理员批量归还：勾选当前借出记录，统一备注一次强制归还。
+      const selectedActiveRecordIds = Vue.ref([]);
+      const selectedActiveRecordNames = Vue.computed(() => activeRecords.value.filter(record => selectedActiveRecordIds.value.includes(record.id)).map(record => record.deviceName));
+      const showBatchForceReturn = Vue.ref(false);
+      const batchReturnNotesAdmin = Vue.ref('');
+      const batchForceReturnError = Vue.ref('');
       const showBatchOffline = Vue.ref(false);
       const batchOperationalStatus = Vue.ref('offline');
       const batchOfflineReason = Vue.ref('');
@@ -2636,9 +2883,56 @@ const AdminPage = {
       const notes = prompt('可填写归还备注：', '管理员确认归还') ?? '';
       const res = await apiCall('POST', '/api/records/' + record.id + '/force-return', { notes });
       if (res.success) {
+        // 单独归还成功后从批量勾选中移除，保证批量数量实时准确。
+        const index = selectedActiveRecordIds.value.indexOf(record.id);
+        if (index >= 0) selectedActiveRecordIds.value.splice(index, 1);
         await loadData();
       } else {
         alert(res.message || '归还失败');
+      }
+    }
+
+    function toggleActiveRecordSelect(recordId) {
+      const index = selectedActiveRecordIds.value.indexOf(recordId);
+      if (index >= 0) selectedActiveRecordIds.value.splice(index, 1);
+      else selectedActiveRecordIds.value.push(recordId);
+    }
+
+    function openBatchForceReturn() {
+      if (!selectedActiveRecordIds.value.length) return;
+      batchReturnNotesAdmin.value = '';
+      batchForceReturnError.value = '';
+      showBatchForceReturn.value = true;
+    }
+
+    function closeBatchForceReturn() {
+      showBatchForceReturn.value = false;
+      batchReturnNotesAdmin.value = '';
+      batchForceReturnError.value = '';
+    }
+
+    async function submitBatchForceReturn() {
+      if (!selectedActiveRecordIds.value.length) return;
+      submitting.value = true;
+      batchForceReturnError.value = '';
+      try {
+        const res = await apiCall('POST', '/api/records/force-return-batch', {
+          recordIds: selectedActiveRecordIds.value,
+          notes: batchReturnNotesAdmin.value
+        });
+        if (!res.success) {
+          const conflictMessages = (res.data?.conflicts || []).map(item => `${item.deviceName || item.recordId}：${item.reason}`).join('；');
+          batchForceReturnError.value = conflictMessages || res.message || '批量归还失败';
+          return;
+        }
+        alert(res.message);
+        selectedActiveRecordIds.value = [];
+        closeBatchForceReturn();
+        await loadData();
+      } catch (error) {
+        batchForceReturnError.value = '批量归还失败，请稍后重试';
+      } finally {
+        submitting.value = false;
       }
     }
 
@@ -3088,6 +3382,8 @@ const AdminPage = {
       saveDevice, editDevice, deleteDevice, toggleOperationalStatus, generatePortalQR, generateDeviceQR, archiveRecord, restoreRecord,
       deleteRecordPermanently, editActiveRecord, closeRecordModal, saveActiveRecord,
       forceReturnRecord, formatDate,
+      selectedActiveRecordIds, selectedActiveRecordNames, showBatchForceReturn, batchReturnNotesAdmin, batchForceReturnError,
+      toggleActiveRecordSelect, openBatchForceReturn, closeBatchForceReturn, submitBatchForceReturn,
       adminImageSource, hasAdminImage, markAdminImageLoaded, markAdminImageFailed, isAdminImageLoaded,
       showAddCategory, newCategoryName, editingCategory,
       categoryDragId, categoryDragOverId, startCategoryDrag, dragOverCategory, dropCategory, finishCategoryDrag,

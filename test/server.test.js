@@ -705,6 +705,260 @@ test('privacy and administrator record-management contract', async t => {
     assert.equal(result.body.success, true);
   });
 
+  // 批量借出契约：同一借用信息一次借多台设备，单台冲突不影响其他设备借出。
+  await t.test('batch borrowing borrows several devices and reports conflicts', async () => {
+    let result = await request('/api/records/borrow-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceIds: ['DEV_AVAILABLE', 'DEV_STATUS'],
+        borrowerName: '批量借用用户',
+        borrowerId: '2024010101',
+        borrowerPhone: '13500004444',
+        major: '批量测试专业',
+        purpose: '批量测试用途'
+      })
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.success, true);
+    assert.equal(result.body.data.borrowed.length, 2);
+    assert.equal(result.body.data.conflicts.length, 0);
+    assert.match(result.body.message, /成功借出 2 台设备/);
+    const borrowedItems = result.body.data.borrowed;
+
+    // 借出后设备状态必须同步为已借出，并展示脱敏借用人信息。
+    result = await request('/api/devices/DEV_AVAILABLE/status');
+    assert.equal(result.body.data.currentBorrower.name, '批****户');
+    assert.equal(result.body.data.currentBorrower.phone, '135****');
+    result = await request('/api/devices/DEV_STATUS/status');
+    assert.equal(result.body.data.currentBorrower.name, '批****户');
+
+    // 归还两台设备，避免影响后续测试的共享状态。
+    for (const item of borrowedItems) {
+      const returned = await request('/api/records/' + item.recordId + '/force-return', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
+        body: JSON.stringify({ notes: '批量测试归还' })
+      });
+      assert.equal(returned.response.status, 200);
+    }
+  });
+
+  await t.test('batch borrowing reports conflicts while borrowing the rest', async () => {
+    // DEV_STATUS 可借，DEV_BORROWED 处于借出状态，只能借出前者。
+    let result = await request('/api/records/borrow-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceIds: ['DEV_STATUS', 'DEV_BORROWED'],
+        borrowerName: '批量冲突用户',
+        borrowerPhone: '13500005555',
+        major: '批量测试专业',
+        purpose: '批量测试用途'
+      })
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.success, true);
+    assert.equal(result.body.data.borrowed.length, 1);
+    assert.equal(result.body.data.borrowed[0].deviceId, 'DEV_STATUS');
+    assert.equal(result.body.data.conflicts.length, 1);
+    assert.equal(result.body.data.conflicts[0].deviceId, 'DEV_BORROWED');
+    assert.equal(result.body.data.conflicts[0].reason, '该设备已被借用，请先归还');
+    assert.match(result.body.message, /成功借出 1 台设备，1 台设备暂时无法借用/);
+
+    // 归还借出的 DEV_STATUS，恢复共享状态。
+    result = await request('/api/records/' + result.body.data.borrowed[0].recordId + '/force-return', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
+      body: JSON.stringify({ notes: '批量测试归还' })
+    });
+    assert.equal(result.response.status, 200);
+  });
+
+  await t.test('batch borrowing validates device list and borrower fields', async () => {
+    let result = await request('/api/records/borrow-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceIds: [], borrowerName: '测试用户', borrowerPhone: '13500006666', major: '测试专业', purpose: '测试用途'
+      })
+    });
+    assert.equal(result.response.status, 400);
+    assert.equal(result.body.message, '请选择要借用的设备');
+
+    const manyIds = Array.from({ length: 11 }, (_, i) => 'DEV_' + i);
+    result = await request('/api/records/borrow-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceIds: manyIds, borrowerName: '测试用户', borrowerPhone: '13500006666', major: '测试专业', purpose: '测试用途'
+      })
+    });
+    assert.equal(result.response.status, 400);
+    assert.equal(result.body.message, '单次最多可批量借用 10 台设备');
+
+    result = await request('/api/records/borrow-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceIds: ['DEV_AVAILABLE'], borrowerName: '测试用户', borrowerPhone: '', major: '测试专业', purpose: '测试用途'
+      })
+    });
+    assert.equal(result.response.status, 400);
+    assert.equal(result.body.message, '姓名、完整手机号、专业和用途均为必填项');
+  });
+
+  // 用户批量归还契约：查询凭证覆盖多台记录，统一备注一次归还；单台异常不影响其他设备。
+  await t.test('batch return returns several devices with one authorization', async () => {
+    let result = await request('/api/records/borrow-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceIds: ['DEV_AVAILABLE', 'DEV_STATUS'],
+        borrowerName: '批量归还用户',
+        borrowerPhone: '13500007777',
+        major: '批量测试专业',
+        purpose: '批量测试用途'
+      })
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.data.borrowed.length, 2);
+
+    result = await request('/api/records/return-lookup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ borrowerName: '批量归还用户', borrowerPhone: '13500007777' })
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.data.records.length, 2);
+    const recordIds = result.body.data.records.map(record => record.recordId);
+    const returnToken = result.body.data.returnToken;
+
+    result = await request('/api/records/return-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recordIds, returnToken, notes: '统一归还备注' })
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.success, true);
+    assert.equal(result.body.data.returned.length, 2);
+    assert.equal(result.body.data.conflicts.length, 0);
+    assert.match(result.body.message, /成功归还 2 台设备/);
+
+    // 归还后两台设备恢复为可借状态。
+    result = await request('/api/devices/available');
+    assert.equal(result.body.data.some(device => device.id === 'DEV_AVAILABLE'), true);
+    assert.equal(result.body.data.some(device => device.id === 'DEV_STATUS'), true);
+  });
+
+  await t.test('batch return reports conflicts for invalid records', async () => {
+    let result = await request('/api/records/borrow-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceIds: ['DEV_STATUS'],
+        borrowerName: '批量冲突归还用户',
+        borrowerPhone: '13500008888',
+        major: '批量测试专业',
+        purpose: '批量测试用途'
+      })
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.data.borrowed.length, 1);
+
+    result = await request('/api/records/return-lookup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ borrowerName: '批量冲突归还用户', borrowerPhone: '13500008888' })
+    });
+    const validRecordId = result.body.data.records[0].recordId;
+    const returnToken = result.body.data.returnToken;
+
+    // 提交一个有效记录 + 一个不在授权内的记录，只有有效记录被归还。
+    result = await request('/api/records/return-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recordIds: [validRecordId, 'REC_NOT_AUTHORIZED'], returnToken, notes: '部分归还' })
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.success, true);
+    assert.equal(result.body.data.returned.length, 1);
+    assert.equal(result.body.data.conflicts.length, 1);
+    assert.equal(result.body.data.conflicts[0].recordId, 'REC_NOT_AUTHORIZED');
+    assert.match(result.body.message, /成功归还 1 台设备，1 台设备无法归还/);
+  });
+
+  await t.test('batch return validates record list and token', async () => {
+    let result = await request('/api/records/return-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recordIds: [], returnToken: 'x', notes: '' })
+    });
+    assert.equal(result.response.status, 400);
+    assert.equal(result.body.message, '请选择要归还的设备');
+
+    const manyIds = Array.from({ length: 11 }, (_, i) => 'REC_' + i);
+    result = await request('/api/records/return-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recordIds: manyIds, returnToken: 'x', notes: '' })
+    });
+    assert.equal(result.response.status, 400);
+    assert.equal(result.body.message, '单次最多可批量归还 10 台设备');
+
+    result = await request('/api/records/return-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recordIds: ['REC_1'], returnToken: 'invalid-token', notes: '' })
+    });
+    assert.equal(result.response.status, 403);
+    assert.equal(result.body.message, '归还验证已失效，请重新查询');
+  });
+
+  // 管理员批量强制归还契约：一次归还多台借出设备，只写一条汇总日志。
+  await t.test('administrator batch force-return returns several devices with one log', async () => {
+    let result = await request('/api/records/borrow-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceIds: ['DEV_AVAILABLE', 'DEV_STATUS'],
+        borrowerName: '批量管理员归还用户',
+        borrowerPhone: '13500009999',
+        major: '批量测试专业',
+        purpose: '批量测试用途'
+      })
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.data.borrowed.length, 2);
+    // 只归还本次借出的两台，避免误归还 fixture 中的其他借出记录。
+    const myRecordIds = result.body.data.borrowed.map(item => item.recordId);
+
+    const beforeLogs = await request('/api/operation-logs', { headers: { 'x-session-id': sessionId } });
+    const beforeAdminReturned = beforeLogs.body.data.filter(log => log.action === 'admin_returned').length;
+
+    result = await request('/api/records/force-return-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
+      body: JSON.stringify({ recordIds: myRecordIds, notes: '管理员统一归还' })
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.success, true);
+    assert.equal(result.body.data.returned.length, 2);
+    assert.match(result.body.message, /成功归还 2 台设备/);
+
+    // 批量归还只追加一条 admin_returned 汇总日志，且日志不含借用人隐私。
+    const afterLogs = await request('/api/operation-logs', { headers: { 'x-session-id': sessionId } });
+    const afterAdminReturned = afterLogs.body.data.filter(log => log.action === 'admin_returned').length;
+    assert.equal(afterAdminReturned, beforeAdminReturned + 1);
+    assert.equal(JSON.stringify(afterLogs.body.data).includes('批量管理员归还用户'), false);
+    assert.equal(JSON.stringify(afterLogs.body.data).includes('13500009999'), false);
+
+    // 设备恢复可借。
+    result = await request('/api/devices/available');
+    assert.equal(result.body.data.some(device => device.id === 'DEV_AVAILABLE'), true);
+    assert.equal(result.body.data.some(device => device.id === 'DEV_STATUS'), true);
+  });
+
   await t.test('only an exact name and full-phone lookup can return matching equipment', async () => {
     let result = await request('/api/records/return-lookup', {
       method: 'POST',

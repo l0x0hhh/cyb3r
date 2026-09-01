@@ -202,15 +202,20 @@ async function waitForMessageCount(smtp, count, deadline = 5000) {
   return smtp.getMessages();
 }
 
-async function startEmailTestServer() {
+// 邮件批量回归夹具：允许调用方注入设备集合，覆盖重复名称和型号场景。
+async function startEmailTestServer(devices = [
+  { id: 'DEV_EMAIL', name: '测试相机', model: 'EMAIL-1', category: 'cat-camera', status: 'available' },
+  { id: 'DEV_EMAIL_2', name: '测试镜头', model: 'LENS-1', category: 'cat-lens', status: 'available' }
+]) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'device-management-email-test-'));
   const uploadDir = path.join(dataDir, 'uploads');
   const qrDir = path.join(dataDir, 'qrcodes');
   fs.mkdirSync(uploadDir, { recursive: true });
   fs.mkdirSync(qrDir, { recursive: true });
-  fs.writeFileSync(path.join(dataDir, 'devices.json'), JSON.stringify([{
-    id: 'DEV_EMAIL', name: '测试相机', model: 'EMAIL-1', category: 'cat-camera', status: 'available', createdAt: new Date().toISOString()
-  }]));
+  fs.writeFileSync(path.join(dataDir, 'devices.json'), JSON.stringify(devices.map(device => ({
+    ...device,
+    createdAt: device.createdAt || new Date().toISOString()
+  }))));
   fs.writeFileSync(path.join(dataDir, 'records.json'), '[]');
 
   const smtp = await startFakeSmtpServer();
@@ -375,4 +380,150 @@ test('legacy subject and body templates act as a fallback for every event', asyn
   assert.equal(returned.response.status, 200);
   messages = await waitForMessageCount(env.smtp, 2);
   assert.match(decodeMessageSubject(messages[1]), /旧模板主题：用户归还/);
+});
+
+// 批量借出/用户批量归还/管理员批量归还各自只发一封汇总邮件：模板中的 {{deviceName}}/{{deviceModel}}
+// 在批量事件下渲染为顿号分隔的完整清单，不新增模板变量。
+test('batch operations send one summary email with a device list', async t => {
+  const env = await startEmailTestServer();
+  t.after(env.cleanup);
+
+  const save = await request('/api/admin/email-settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'x-session-id': env.sessionId },
+    body: JSON.stringify({
+      enabled: true,
+      notifyBorrow: true,
+      notifyReturn: true,
+      notifyAdminReturn: true,
+      recipients: ['admin@example.com'],
+      smtp: { host: '127.0.0.1', port: env.smtp.port, security: 'none', username: 'sender@example.com', secret: 'secret' },
+      templates: {
+        borrow: { subject: '【借出】{{deviceName}}', body: '借出汇总\n设备名称：{{deviceName}}\n设备型号：{{deviceModel}}\n姓名：{{borrowerName}}' },
+        return: { subject: '【归还】{{deviceName}}', body: '归还汇总\n设备名称：{{deviceName}}\n设备型号：{{deviceModel}}' },
+        adminReturn: { subject: '【管理归还】{{deviceName}}', body: '管理归还汇总\n设备名称：{{deviceName}}\n设备型号：{{deviceModel}}' }
+      }
+    })
+  });
+  assert.equal(save.response.status, 200, env.output);
+
+  const borrowBody = { deviceIds: ['DEV_EMAIL', 'DEV_EMAIL_2'], borrowerName: '张三', borrowerId: '2026000001', borrowerPhone: '13800138000', major: '网络安全', purpose: '课程拍摄' };
+  const batchBorrow = await request('/api/records/borrow-batch', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(borrowBody)
+  });
+  assert.equal(batchBorrow.response.status, 200);
+  assert.equal(batchBorrow.body.data.borrowed.length, 2);
+
+  // 借出 2 台只发 1 封汇总邮件，{{deviceName}}/{{deviceModel}} 渲染为顿号分隔清单。
+  let messages = await waitForMessageCount(env.smtp, 1);
+  assert.equal(messages.length, 1);
+  assert.match(decodeMessageSubject(messages[0]), /【借出】测试相机、测试镜头/);
+  assert.match(decodeMessageBody(messages[0]), /设备名称：测试相机、测试镜头/);
+  assert.match(decodeMessageBody(messages[0]), /设备型号：EMAIL-1、LENS-1/);
+
+  const lookup = await request('/api/records/return-lookup', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ borrowerName: '张三', borrowerPhone: '13800138000' })
+  });
+  assert.equal(lookup.body.data.records.length, 2);
+  const recordIds = lookup.body.data.records.map(record => record.recordId);
+
+  // 用户批量归还 2 台只发 1 封，设备清单同样通过既有字段渲染。
+  const batchReturn = await request('/api/records/return-batch', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recordIds, returnToken: lookup.body.data.returnToken, notes: '统一归还' })
+  });
+  assert.equal(batchReturn.response.status, 200);
+  assert.equal(batchReturn.body.data.returned.length, 2);
+  messages = await waitForMessageCount(env.smtp, 2);
+  assert.equal(messages.length, 2);
+  assert.match(decodeMessageSubject(messages[1]), /【归还】测试相机、测试镜头/);
+  assert.match(decodeMessageBody(messages[1]), /设备名称：测试相机、测试镜头/);
+  assert.match(decodeMessageBody(messages[1]), /设备型号：EMAIL-1、LENS-1/);
+
+  // 再次批量借出，管理员批量归还 2 台只发 1 封管理归还邮件。
+  const borrowAgain = await request('/api/records/borrow-batch', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(borrowBody)
+  });
+  assert.equal(borrowAgain.response.status, 200);
+  messages = await waitForMessageCount(env.smtp, 3);
+
+  const active = await request('/api/records/active', { headers: { 'x-session-id': env.sessionId } });
+  const activeIds = active.body.data.map(record => record.id);
+  const forceReturn = await request('/api/records/force-return-batch', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': env.sessionId },
+    body: JSON.stringify({ recordIds: activeIds, notes: '管理员统一归还' })
+  });
+  assert.equal(forceReturn.response.status, 200);
+  assert.equal(forceReturn.body.data.returned.length, 2);
+  messages = await waitForMessageCount(env.smtp, 4);
+  assert.equal(messages.length, 4);
+  // 设备清单顺序跟随归还记录顺序（可能反序），只校验事件名与两台设备都在。
+  assert.match(decodeMessageSubject(messages[3]), /^【管理归还】/);
+  assert.match(decodeMessageSubject(messages[3]), /测试相机/);
+  assert.match(decodeMessageSubject(messages[3]), /测试镜头/);
+  assert.match(decodeMessageBody(messages[3]), /设备名称：/);
+  assert.match(decodeMessageBody(messages[3]), /测试相机/);
+  assert.match(decodeMessageBody(messages[3]), /测试镜头/);
+  assert.match(decodeMessageBody(messages[3]), /设备型号：/);
+  assert.match(decodeMessageBody(messages[3]), /EMAIL-1/);
+  assert.match(decodeMessageBody(messages[3]), /LENS-1/);
+});
+
+// 批量邮件必须保留每条成功记录，不能因名称或型号重复而丢失设备位置。
+test('batch summary email preserves every repeated device name and model', async t => {
+  const devices = Array.from({ length: 10 }, (_, index) => ({
+    id: 'DEV_DUP_' + (index + 1),
+    name: index % 2 === 0 ? '单反相机' : '测试设备',
+    model: index % 3 === 0 ? 'DUP-1' : 'DUP-2',
+    category: 'cat-camera',
+    status: 'available'
+  }));
+  const env = await startEmailTestServer(devices);
+  t.after(env.cleanup);
+
+  const save = await request('/api/admin/email-settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'x-session-id': env.sessionId },
+    body: JSON.stringify({
+      enabled: true,
+      notifyBorrow: true,
+      notifyReturn: false,
+      notifyAdminReturn: false,
+      recipients: ['admin@example.com'],
+      smtp: { host: '127.0.0.1', port: env.smtp.port, security: 'none', username: 'sender@example.com', secret: 'secret' },
+      templates: {
+        borrow: {
+          subject: '借出：{{deviceName}}',
+          body: '设备名称：{{deviceName}}\n设备型号：{{deviceModel}}\n设备编号：{{deviceId}}\n借用时间：{{borrowedAt}}'
+        }
+      }
+    })
+  });
+  assert.equal(save.response.status, 200, env.output);
+
+  const borrowed = await request('/api/records/borrow-batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      deviceIds: devices.map(device => device.id),
+      borrowerName: '批量测试用户',
+      borrowerPhone: '13800138000',
+      major: '网络安全',
+      purpose: '重复字段邮件回归测试'
+    })
+  });
+  assert.equal(borrowed.response.status, 200);
+  assert.equal(borrowed.body.data.borrowed.length, 10);
+
+  const messages = await waitForMessageCount(env.smtp, 1);
+  assert.equal(messages.length, 1);
+  const body = decodeMessageBody(messages[0]);
+  const lines = body.split('\n');
+  assert.equal(lines.length, 4);
+  assert.equal(lines[0], '设备名称：' + devices.map(device => device.name).join('、'));
+  assert.equal(lines[1], '设备型号：' + devices.map(device => device.model).join('、'));
+  assert.equal(lines[2], '设备编号：' + devices.map(device => device.id).join('、'));
+  assert.match(lines[3], /^借用时间：\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  assert.doesNotMatch(body, /&#x20;|\\/);
 });
