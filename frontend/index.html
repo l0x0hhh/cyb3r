@@ -218,6 +218,12 @@
   }
   .portal-device-row__cart:hover { background: rgba(0,128,160,.08); }
   .portal-device-row__cart--active { background: var(--moss-bg); border-color: transparent; color: var(--moss); }
+  /* 其他设备入口与设备列表保持同一张力，但用虚线边界强调它不是库存卡片。 */
+  .portal-other-device-entry { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 22px; padding: 18px 20px; border: 1px dashed rgba(0,128,160,.34); border-radius: var(--radius); background: linear-gradient(135deg, rgba(0,128,160,.045), rgba(255,255,255,.72)); }
+  .portal-other-device-entry h2 { margin-top: 3px; font-family: var(--serif); font-size: 18px; line-height: 1.3; }
+  .portal-other-device-entry p { color: var(--text-soft); font-size: 12px; line-height: 1.55; }
+  .portal-other-device-entry__eyebrow { color: var(--brand-deep) !important; font-size: 11px !important; font-weight: 700; letter-spacing: .04em; }
+  .portal-other-device-entry .btn { flex: none; }
   .portal-media-image { opacity: 0; filter: blur(15px); transform: scale(1.03); transform-origin: center; transition: opacity .3s ease, filter .6s ease, transform .6s ease; }
   .portal-media-image.is-loaded { opacity: 1; filter: blur(0); transform: scale(1); }
   .portal-back { margin-bottom: 14px; padding: 8px 0; color: var(--ink-soft); background: transparent; font-size: 13px; font-weight: 700; }
@@ -462,6 +468,8 @@
   .portal-feedback__copy { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 2px; }
   .portal-feedback__copy strong { font-size: 13.5px; line-height: 1.35; }
   .portal-feedback__copy small { color: var(--text-soft); font-size: 11.5px; line-height: 1.45; overflow-wrap: anywhere; }
+  .portal-feedback__action { flex: none; padding: 7px 10px; border: 1px solid var(--brand); border-radius: 8px; color: var(--brand-deep); background: var(--brand-soft); font-size: 12px; font-weight: 700; text-decoration: none; white-space: nowrap; transition: background .2s, color .2s, border-color .2s; }
+  .portal-feedback__action:hover, .portal-feedback__action:focus-visible { color: #f7feff; background: var(--brand-deep); border-color: var(--brand-deep); }
   .portal-feedback__close { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 26px; height: 26px; border-radius: 50%; color: var(--text-soft); background: var(--paper-2); font-size: 15px; }
   .portal-feedback__close:hover { color: var(--ink); background: var(--line); }
   .portal-feedback--warning { border-color: #e8d0a1; background: rgba(255,250,238,.97); }
@@ -470,6 +478,47 @@
   .portal-feedback--error .portal-feedback__mark { background: var(--clay); }
   .portal-feedback-enter-active, .portal-feedback-leave-active { transition: opacity .2s ease, transform .2s ease; }
   .portal-feedback-enter-from, .portal-feedback-leave-to { opacity: 0; transform: translate(-50%, -8px); }
+
+  /* 答案之书页复用参考站点的白底、居中排版、翻书等待和结果分享布局。 */
+  @font-face { font-family: 'AnswerBookFont'; src: url('/assets/answer-book.ttf') format('truetype'); font-display: swap; }
+  .answers-page { position: relative; display: flex; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; color: #000; background: #fff; user-select: none; -webkit-user-select: none; }
+  .answers-site-title { position: absolute; top: 16px; left: 24px; z-index: 2; font-size: 16px; font-weight: 500; }
+  .answers-site-title a { display: inline-flex; align-items: center; color: inherit; text-decoration: none; }
+  .answers-site-title img { display: block; width: 36px; height: 36px; margin-right: 0; }
+  .answers-site-title span { line-height: 36px; }
+  /* 返回入口固定在答案页右上角，和左上角标题保持同一层级。 */
+  .answers-back-link { position: absolute; top: 24px; right: 24px; z-index: 2; color: rgba(0, 0, 0, .51); font-size: 16px; line-height: 36px; text-decoration: none; }
+  .answers-back-link:hover, .answers-back-link:focus-visible { color: rgba(0, 0, 0, .82); text-decoration: underline; }
+  /* 答案页使用白底时同步覆盖根滚动条槽位，避免右侧出现异色竖条。 */
+  html.answers-route, body.answers-route { background: #fff; background-image: none; }
+  .answers-stage { position: relative; width: min(100%, 960px); padding: 0 16px; text-align: center; }
+  .answers-home h1 { font-size: 24px; font-weight: 500; line-height: 1.45; }
+  .answers-home__main { margin-bottom: 20px; }
+  .answers-book-image { display: block; width: min(300px, 82vw); height: auto; margin: 0 auto; cursor: pointer; }
+  .answers-home__main p { margin-top: 5px; color: rgba(0, 0, 0, .51); font-size: 16px; line-height: 1.5; }
+  .answers-loading { color: rgba(0, 0, 0, .51); font-size: 14px; line-height: 1.5; }
+  .answers-loading__animation { display: block; width: 160px; height: 160px; margin: 0 auto; }
+  /* 结果文字限制宽度并允许换行，避免长答案被页面边界裁切。 */
+  .answers-result__quote { max-width: min(100%, 960px); margin: 0 auto; font-family: 'AnswerBookFont', var(--sans); font-size: clamp(48px, 5.4vw, 88px); line-height: 1.18; white-space: normal; overflow-wrap: anywhere; }
+  .answers-result__actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 16px 20px; margin-top: 60px; }
+  .answers-share-button { flex: 0 0 auto; border: 0; border-radius: 16px; color: #fff; background: #111; font-size: 15px; line-height: 1; padding: 12px 22px; cursor: pointer; font-family: inherit; }
+  .answers-share-button:hover, .answers-share-button:active { opacity: .85; }
+  .answers-retry-button { display: inline-block; border: 0; padding: 0; color: rgba(0, 0, 0, .51); background: transparent; font-size: 16px; line-height: 1.5; cursor: pointer; }
+  .answers-retry-button:hover, .answers-retry-button:focus-visible { color: rgba(0, 0, 0, .66); text-decoration: underline; }
+  .answers-share-toast { position: fixed; left: 50%; bottom: calc(28px + env(safe-area-inset-bottom, 0px)); z-index: 50; max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 12px; color: #fff; background: rgba(17, 17, 17, .92); font-size: 14px; line-height: 1.4; letter-spacing: .01em; white-space: nowrap; transform: translateX(-50%); }
+  @media (max-width: 768px) {
+    .answers-site-title { top: 12px; left: 12px; font-size: 14px; }
+    .answers-site-title img { width: 28px; height: 28px; }
+    .answers-site-title span { line-height: 28px; }
+    .answers-back-link { top: 12px; right: 12px; font-size: 14px; line-height: 28px; }
+    .answers-stage { padding-inline: 12px; }
+    .answers-home h1 { font-size: 20px; }
+    .answers-book-image { width: min(300px, 82vw); }
+    .answers-home__main p { font-size: 14px; }
+    .answers-result__quote { max-width: 100%; font-size: clamp(42px, 13vw, 76px); white-space: normal; overflow-wrap: anywhere; }
+    .answers-result__actions { margin-top: 42px; }
+    .answers-share-toast { font-size: 13px; }
+  }
 
   .form-group { display: flex; flex-direction: column; gap: 6px; }
   .form-group label { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
@@ -823,6 +872,8 @@
     .portal-device-list--waterfall { gap: 11px; }
     .portal-device-list__column { gap: 11px; }
     .portal-device-row { margin-bottom: 11px; border-radius: 13px; }
+    .portal-other-device-entry { align-items: flex-start; flex-direction: column; gap: 12px; padding: 16px; }
+    .portal-other-device-entry .btn { width: 100%; }
     .tab-btn { flex: 0 0 auto; min-width: max-content; white-space: nowrap; }
     .tab-badge { flex: none; }
     .device-grid--list .device-card { grid-template-columns: 72px minmax(0, 1fr); grid-template-rows: minmax(96px, auto) auto; }
@@ -889,6 +940,7 @@
     .portal-title { font-size: 25px; }
     .portal-affiliation { font-size: 11px; line-height: 1.3; }
     .portal-feedback { top: 70px; width: calc(100vw - 24px); }
+    .portal-feedback__action { padding-inline: 8px; font-size: 11px; }
     
     .portal-main { padding: 22px 14px 6px; }
     .portal-device-row__content { padding: 11px 11px 4px; }
@@ -904,6 +956,14 @@
     .nav-brand__title { font-size: 18px; }
     .nav-affiliation { max-width: 158px; line-height: 1.25; }
     .nav-user { display: none; }
+    .answers-header { width: calc(100% - 28px); padding: 18px 0; }
+    .answers-header__mark { font-size: 9px; }
+    .answers-main { padding: 42px 18px 36px; }
+    .answers-main h1 { font-size: 42px; }
+    .answers-intro { font-size: 13px; }
+    .answers-book { width: 184px; margin-top: 42px; }
+    .answers-result { padding: 22px 17px 18px; }
+    .answers-result__actions { gap: 12px; }
   }
 
   /* 记录卡片 */
@@ -933,6 +993,9 @@
   a.record-contact-item { color: var(--brand-deep); font-weight: 600; }
   .record-time { font-size: 12px; color: var(--text-soft); }
   .record-card-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 12px; margin-top: 12px; border-top: 1px dashed var(--line); }
+  /* 管理员一眼区分库存设备与用户临时填写的待上线设备。 */
+  .record-device-flags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+  .record-device-flag { display: inline-flex; align-items: center; width: fit-content; padding: 2px 7px; border-radius: 999px; color: #785217; background: #fff1cf; font-size: 11px; font-weight: 700; line-height: 1.3; }
 
   /* 分类排序列表 */
   .category-list { display: flex; flex-direction: column; gap: 8px; }
@@ -1003,6 +1066,7 @@
     .portal-media-image,
     .device-card-img img { transition: none !important; }
     .category-sort-move { transition: none !important; }
+    .answers-book-image { transition: none !important; }
     .page-footer__hitokoto-cursor { animation: none !important; }
     * { scroll-behavior: auto !important; }
   }

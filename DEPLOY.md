@@ -205,11 +205,19 @@ sudo -u deviceapp git -C /opt/device-management status --short --branch
 
 ## 9. 数据备份
 
-当前版本使用 JSON 文件保存设备和借用记录，因此必须定期备份：
+当前业务版本以 SQLite 作为唯一运行时数据源，默认数据库为 `/var/lib/device-management/data/device-management.sqlite`；旧 JSON 文件仅用于首次迁移和人工回滚备份。数据库、旧 JSON、上传图片、二维码和环境配置都应纳入备份范围：
 
 ```bash
 sudo tar -czf /root/device-management-$(date +%F-%H%M).tar.gz /var/lib/device-management
 ```
+
+首次接入或生产迁移时，必须先在本地生成独立副本并核对数量；运行时初始化仅在数据库不存在时导入旧 JSON，数据库已存在时不会覆盖或回写。禁止直接指定生产数据库路径覆盖已有文件：
+
+```bash
+npm run migrate:sqlite -- --data-dir ./data --output ./data/device-management.sqlite
+```
+
+迁移脚本和运行时要求 Node.js 22.5+，使用内置 `node:sqlite`。生产迁移前先备份 `/var/lib/device-management`，确认数据库完整性和记录数量，再以服务用户启动新版本；旧 JSON 清理必须另行评审，不随源码更新自动执行。源码同步、构建和重启均不得覆盖 `/var/lib/device-management`。
 
 建议通过 cron 每天备份，并将备份同步到另一台机器或对象存储。更新代码时不要覆盖 `/var/lib/device-management`。
 

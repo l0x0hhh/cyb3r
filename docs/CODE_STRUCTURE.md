@@ -1,6 +1,6 @@
 # 设备管理项目代码结构与定位指南
 
-> 最后更新：2026-08-31
+> 最后更新：2026-09-03
 > 适用版本：当前本地工作区（网页端 UX、管理员邮件通知、原生微信小程序普通用户端）  
 > 用途：回答“一个需求应该改哪里、会影响什么、用什么验证”。产品规则以 [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) 为准，短期进度以 [`CURRENT_STATUS.md`](CURRENT_STATUS.md) 为准。
 
@@ -12,10 +12,13 @@
 
 | 文件 | 主要职责 | 修改前优先搜索的锚点 |
 |---|---|---|
-| `server.js` | 环境配置、JSON 持久化、安全中间件、图片处理、全部 API、页面入口 | `// ====================`、具体路由字符串 |
+| `server.js` | 环境配置、SQLite 运行时数据访问、安全中间件、图片处理、全部 API、页面入口 | `// ====================`、具体路由字符串 |
+| `db/repository.js` | SQLite 初始化、JSON 首次迁移、对象字段转换和事务封装 | `createSqliteStore`、`transaction`、表映射 |
+| `db/schema.sql` | SQLite 表、索引和约束定义 | `CREATE TABLE`、表名 |
+| `scripts/migrate-json-to-sqlite.js` | 将 JSON 数据复制到 SQLite，事务导入并拒绝覆盖已有目标库 | `migrate`、`--data-dir`、`--output` |
 | `email-service.js` | 内置 SMTP 客户端和 UTF-8 纯文本邮件组装 | `sendSmtpMail`、`SmtpConnection` |
-| `frontend/src/main.js` | 用户借还页、管理后台、浏览器端状态和接口调用 | `const BorrowPage`、`const AdminPage`、函数名、模板注释 |
-| `frontend/index.html` | HTML 入口、全局 CSS、响应式与动画 | `/* ============ 借还页`、`弹窗 & 表单`、`管理后台`、`动画` |
+| `frontend/src/main.js` | 用户借还页、答案之书彩蛋、管理后台、浏览器端状态和接口调用 | `const BorrowPage`、`const AnswersPage`、`const AdminPage`、函数名、模板注释 |
+| `frontend/index.html` | HTML 入口、全局 CSS、响应式与动画 | `/* ============ 借还页`、`答案之书彩蛋`、`弹窗 & 表单`、`管理后台`、`动画` |
 | `miniprogram/services/api.js` | 小程序统一请求、API 地址、图片地址和日期格式化 | `request`、`assetUrl` |
 | `miniprogram/pages/*` | 小程序普通用户列表、详情、借用表单、归还查询页面 | `pages/borrow`、`pages/detail`、`pages/borrow-form`、`pages/return` |
 
@@ -29,7 +32,8 @@ flowchart TD
   N --> E["Express / Node.js :3000"]
   E --> API["REST API"]
   E --> FE["frontend/dist 静态文件"]
-  E --> DATA["JSON: devices / records / categories"]
+  E --> DATA["SQLite: runtime source"]
+  JSON["Legacy JSON: first migration / backup"] -. startup migration .-> DATA
   E --> UP["上传图片 WebP"]
   E --> QR["二维码 PNG"]
   E --> MAIL["email-service.js -> SMTP"]
@@ -51,6 +55,7 @@ flowchart TD
 | 搜索、分类筛选、设备卡片 | `frontend/src/main.js` | `portal-chips`、`filteredDevices`、`categoryIcon` | `test/frontend-source.test.js` + 用户手动浏览器检查 |
 | 用户端布局、颜色、导航、动画 | `frontend/index.html` | `.portal-`、`借还页`、`prefers-reduced-motion` | `test/frontend-source.test.js` + 用户手动桌面/移动检查 |
 | 管理端页面或交互 | `frontend/src/main.js` | `const AdminPage`、对应函数名 | `test/frontend-source.test.js` + 用户手动浏览器检查 |
+| 答案之书彩蛋 | `frontend/src/main.js`、`frontend/index.html`、`server.js` | `AnswersPage`、`ANSWER_BOOK_RESPONSES`、`/answers`、`actionFeedback` | `test/frontend-source.test.js`、`test/server.test.js` + 用户手动浏览器检查 |
 | 管理端样式 | `frontend/index.html` | `管理后台`、`.admin-`、`.device-card` | 用户手动浏览器检查 |
 | 设备 CRUD/上下线 | `server.js` | `设备 CRUD API`、`/api/devices` | `test/server.test.js` |
 | 分类 CRUD | `server.js`、`frontend/src/main.js` | `分类 API`、`分类管理` | `test/server.test.js`、`test/frontend-source.test.js` |
@@ -90,7 +95,9 @@ flowchart TD
 │  │  ├─ anime.min.js                # Anime.js 2.2.0
 │  │  └─ fireworks.js                 # 用户端 Canvas 点击粒子特效
 │  └─ qrcodes/                       # 本地二维码输出，生产为持久化目录
-├─ data/                             # 本地 JSON 数据，生产为持久化目录
+├─ db/
+│  └─ schema.sql                     # SQLite 目标 schema
+├─ data/                             # SQLite 数据库和旧 JSON 迁移/备份文件，生产为持久化目录
 ├─ uploads/                          # 本地上传图片，生产为持久化目录
 ├─ test/
 │  ├─ server.test.js                 # 后端集成与业务规则
@@ -153,7 +160,7 @@ flowchart TD
 
 ### 5.3 数据与兼容层
 
-`readJSON`/`writeJSON` 直接同步读写 JSON。所有兼容规则集中在：
+`server.js` 保留 `readJSON`/`writeJSON` 这一组兼容调用名，但实际由 `db/repository.js` 将对象字段映射到 SQLite 表；数据库不存在时只执行一次 JSON 首次迁移，数据库存在后不再读取或写回 JSON。`scripts/migrate-json-to-sqlite.js` 负责离线副本生成，运行时初始化复用相同的迁移逻辑。所有兼容规则集中在：
 
 - `withDeviceCompatibility`：补齐分类、运营状态、图片缩略图与宽高。
 - `withRecordCompatibility`：兼容旧 `department`/`notes` 字段。
@@ -189,12 +196,15 @@ flowchart TD
 | 二维码 | `POST /api/qrcode/portal` | 管理员生成统一入口二维码 |
 | 二维码 | `POST /api/devices/:id/qrcode` | 管理员生成单设备二维码 |
 | 借还 | `POST /api/records/borrow` | 公共、限流、服务端重验设备状态 |
+| 借还 | `POST /api/records/borrow-other` | 公共、限流、写入未录入库存设备的普通借用记录 |
 | 借还 | `POST /api/records/return-lookup` | 公共、限流、姓名+完整手机号 |
 | 借还 | `POST /api/records/return` | 公共、限流、短期凭证 |
+| 借还 | `POST /api/records/return-batch` | 公共、限流、短期凭证、最多 10 条并发归还 |
 | 记录 | `GET /api/records` | 管理员，可包含归档记录 |
 | 记录 | `GET /api/records/active` | 管理员当前借出 |
 | 记录 | `PUT /api/records/:id` | 管理员修改当前借用信息 |
 | 记录 | `POST /api/records/:id/force-return` | 管理员强制归还 |
+| 记录 | `POST /api/records/force-return-batch` | 管理员批量强制归还，最多 50 条并写一条汇总日志 |
 | 记录 | `DELETE /api/records/:id` | 管理员归档已归还记录 |
 | 记录 | `POST /api/records/:id/restore` | 管理员恢复归档 |
 | 记录 | `DELETE /api/records/:id/permanent` | 管理员永久删除已归档记录 |
@@ -225,6 +235,7 @@ flowchart TD
 - 学院品牌头与“借设备/还设备”导航。
 - 搜索框、分类标签、可借设备瀑布流。
 - 单设备详情、借用信息表单。
+- 未录入库存的“其他设备”借用表单，提交后仍进入普通借用记录。
 - 归还身份查询、待归还列表和确认归还。
 - 浏览器历史与旧二维码 `?id=<deviceId>` 兼容。
 
@@ -237,6 +248,7 @@ flowchart TD
 | `searchQuery`、`activeCategory`、`categories` | 搜索与分类筛选 |
 | `selectedDeviceId`、`device`、`currentBorrower` | 当前详情页；详情媒体区按原图比例居中显示 |
 | `form`、`showBorrowForm`、`submitting` | 借用表单 |
+| `showOtherBorrowForm`、`form.otherDeviceName` | 其他设备借用表单和记录快照字段 |
 | `returnLookup`、`returnResults`、`returnToken` | 归还查询与凭证 |
 | `failedImages`、`loadedImages` | 图片失败占位与加载动画 |
 
@@ -325,15 +337,12 @@ flowchart TD
 
 | 文件 | 写入方 | 主要内容 | 注意事项 |
 |---|---|---|---|
-| `data/devices.json` | 设备 CRUD、借用/归还、上下线 | 设备信息、双维状态、分类、图片元数据 | 生产文件不在代码目录 |
-| `data/records.json` | 借用、归还、记录管理 | 借用人信息、用途、归还与归档时间 | 含敏感信息，不写入文档示例 |
-| `data/categories.json` | 分类 CRUD 与批量重排 | 分类 ID、名称、历史兼容图标、排序 | `cat-other` 是不可删除但可排序的回退项 |
-| `data/operation-logs.json` | 管理员成功动作 | 脱敏设备操作日志 | 生产文件不在代码目录 |
-| `data/email-settings.json` | 管理员邮件设置 | SMTP、通知开关、接收邮箱、三类事件独立模板（`templates.borrow/return/adminReturn`）和加密凭据 | 生产文件不上传；凭据由 `EMAIL_CONFIG_KEY` 加密；旧 `subjectTemplate`/`bodyTemplate` 保留作兼容回退并同步为借出模板 |
+| `data/device-management.sqlite` | 全部业务运行时读写 | 设备、借用记录、分类、操作日志、管理员和邮件设置 | 生产文件不在代码目录；更新不得覆盖 |
+| `data/*.json` | 首次迁移输入或人工备份 | 旧版设备、借用记录、分类、操作日志、管理员和邮件设置 | 运行时数据库存在后不再作为回退数据源；含敏感信息，不写入文档示例 |
 | `uploads/` | Multer + Sharp | 随机命名详情图与缩略图 WebP | 生产更新不得覆盖 |
 | `public/qrcodes/` | QRCode | 统一入口和单设备二维码 PNG | 生产更新不得覆盖 |
 
-设备状态会同时受 `devices.json` 和当前借用记录影响。修改借用或归还逻辑时，必须检查两处写入是否保持一致。
+设备状态会同时受 `devices` 表和当前借用记录影响。借用、归还、设备删除、分类迁移和批量管理动作必须使用 `DATA_STORE.transaction()` 将相关表写入作为一个原子单元。
 
 ## 9. 关键业务请求链路
 
@@ -341,9 +350,11 @@ flowchart TD
 
 `BorrowPage.doBorrow` → `POST /api/records/borrow` → 校验字段和设备在线/空闲 → 写入借用记录 → 将设备设为 `borrowed` → 前端刷新详情/列表。
 
-借用邮件：
+借用和归还邮件：
 
-`POST /api/records/borrow` → 写入设备与记录 → `queueEmailNotification('borrow', record)` → `email-service.js.sendSmtpMail` 异步投递；SMTP 失败只写服务端日志，不影响借用响应。
+`POST /api/records/borrow` 或 `POST /api/records/borrow-other` → 写入普通借用记录（后者不改库存）→ `queueEmailNotification('borrow', record)` → `email-service.js.sendSmtpMail` 异步投递；批量操作改走 `queueBatchEmailNotification`，只投递一封并按借用人分组。SMTP 失败只写服务端日志，不影响借还响应。
+
+`formatEmailRecordGroup` 负责单台/批量明细格式；其他设备名称不携带提醒文字，`deviceNotice` 单独展示，型号和编号缺失分别使用可读兜底文案。管理端默认三类正文已直接填入事件、提醒、明细、时间和备注结构。旧模板未使用新变量时，系统自动补充其他设备提醒和批量明细；历史系统简略正文读取时自动升级，多借用人顶部使用中性提示，避免误显示第一人。测试邮件也复用单台明细格式。
 
 ### 归还
 
@@ -351,13 +362,19 @@ flowchart TD
 
 用户归还和管理员归还在各自记录写入成功后分别调用 `queueEmailNotification('return' | 'adminReturn', record)`，是否发送由邮件设置中的独立开关控制。
 
+单台归还或全部成功的批量归还完成后，`showActionFeedback` 为用户端非阻塞通知附加 `/answers` 操作；答案页由 `AnswersPage` 从本地 `ANSWER_BOOK_RESPONSES` 抽取文案，不调用 API、不写入数据。
+
+### 答案之书
+
+`GET /answers` → `server.js` 复用 `frontend/index.html` → 前端路由渲染 `AnswersPage` → 初始态展示本地 `answer-book.png` → 点击书本执行 `drawAnswer` 并进入 loading 动画 → 展示本地随机答案 → `copyAnswer` 复制/系统分享；“再抽一次”返回 `/answers` 首页重新开始，结果文字在有限宽度内自动换行；页面标题点击返回 `/borrow`。
+
 ### 管理员修改
 
 `doLogin` → 保存 `sessionId` → `apiCall` 自动带 `x-session-id` → `checkAdmin` 保护管理路由 → 成功操作后 `loadData` 刷新管理端四组数据。
 
 ### 图片上传
 
-浏览器选图 → 原文件预览 → `FormData` → Multer 类型/大小限制 → 文件签名校验 → Sharp 旋转、缩放并按原比例生成详情/缩略图 WebP → 设备 JSON 保存新 URL 和宽高。
+浏览器选图 → 原文件预览 → `FormData` → Multer 类型/大小限制 → 文件签名校验 → Sharp 旋转、缩放并按原比例生成详情/缩略图 WebP → SQLite 保存新 URL 和宽高。
 
 ## 10. 测试结构
 
@@ -365,8 +382,8 @@ flowchart TD
 |---|---|---|
 | `test/server.test.js` | API、权限、隐私、状态、归档、分类重排、图片、邮件配置 | 后端业务行为或数据字段变化 |
 | `test/email-service.test.js` | SMTP 认证、收件人、UTF-8 主题和正文编码 | SMTP 协议或邮件格式变化 |
-| `test/email-notification.test.js` | 成功借用后的异步管理员邮件、手机号脱敏 | 通知触发、模板或隐私口径变化 |
-| `test/frontend-source.test.js` | 模板元素、关键交互入口、中文编码、响应式契约；分类拖拽和无裁剪上传 | 前端结构或用户流程变化 |
+| `test/email-notification.test.js` | 单台/批量借还邮件、其他设备提醒、测试邮件明细、手机号脱敏与旧模板兼容 | 通知触发、模板或隐私口径变化 |
+| `test/frontend-source.test.js` | 模板元素、关键交互入口、答案之书路由/抽取、中文编码、响应式契约；分类拖拽和无裁剪上传 | 前端结构或用户流程变化 |
 | `test/security-config.test.js` | 密码环境变量、会话、限流、上传目录、CSP | 安全配置变化 |
 | `test/build-config.test.js` | 依赖、Vite、构建产物、静态品牌资源 | 构建或依赖变化 |
 | `test/miniprogram-source.test.js` | 小程序 AppID、页面注册、公开 API 调用和图片加载样式 | 小程序页面、配置或请求契约变化 |
@@ -395,11 +412,11 @@ npm run build
 
 ## 12. 当前架构限制与后续拆分方向
 
-当前结构适合单实例、小规模内部使用，但有以下明确限制：
+当前结构适合单实例、小规模内部使用；SQLite 已接管业务运行时读写，旧 JSON 仅保留为首次迁移输入和人工备份。当前还有以下明确限制：
 
 1. `server.js` 同时承担配置、存储、鉴权、图片处理和全部路由，修改共享逻辑时回归面较大。
 2. `frontend/src/main.js` 同时包含两套大模板和全部状态，UI 小改动也容易触及长文件。
-3. JSON 同步写入没有事务与跨进程锁，不支持多实例并发写。
+3. 当前仍是单实例部署；SQLite 已为关键跨表操作提供事务和 WAL，但尚未形成多实例部署、共享会话和高可用方案。
 4. 会话和归还凭证只在内存中，服务重启即失效。
 5. 邮件通知为进程内异步发送，没有持久化重试队列；SMTP 短暂不可用时可能丢失通知。
 6. 运行时 Vue 模板要求 CSP 保留 `unsafe-eval`。
@@ -408,8 +425,8 @@ npm run build
 
 1. 先将前端分类图标、设备卡片等纯展示片段拆为可测试组件。
 2. 再将 `BorrowPage` 和 `AdminPage` 拆为独立模块或 `.vue` 组件。
-3. 后端先抽离 JSON repository 与兼容转换函数，再按 categories/devices/records/admin 拆路由。
-4. 只有在并发需求出现后再迁移数据库和共享会话，不提前引入多实例复杂度。
+3. 后端继续按 categories/devices/records/admin 拆分路由，保留 `db/repository.js` 作为统一数据访问边界。
+4. 只有在并发需求出现后再引入共享会话、任务队列或多实例协调机制，不提前增加部署复杂度。
 
 ## 13. 历史 UI 问题定位（已处理）
 

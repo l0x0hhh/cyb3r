@@ -3,12 +3,16 @@
   "version": "1.0.0",
   "description": "学院设备管理系统 - 扫码借还",
   "main": "server.js",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
     "dev:frontend": "vite --host 0.0.0.0",
     "build": "vite build",
     "migrate:images": "node scripts/migrate-image-variants.js",
+    "migrate:sqlite": "node scripts/migrate-json-to-sqlite.js",
     "test": "node --test"
   },
   "dependencies": {

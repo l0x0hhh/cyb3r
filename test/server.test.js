@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { DatabaseSync } = require('node:sqlite');
 const sharp = require('sharp');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -44,6 +45,23 @@ async function request(url, options = {}) {
     : await response.text();
 
   return { response, body };
+}
+
+async function stopServer(child) {
+  if (child.exitCode !== null) return;
+  await new Promise(resolve => {
+    child.once('exit', resolve);
+    child.kill();
+  });
+}
+
+function readSqliteRows(dataDir, table) {
+  const db = new DatabaseSync(path.join(dataDir, 'device-management.sqlite'));
+  try {
+    return db.prepare(`SELECT * FROM ${table}`).all();
+  } finally {
+    db.close();
+  }
 }
 
 test('privacy and administrator record-management contract', async t => {
@@ -129,6 +147,19 @@ test('privacy and administrator record-management contract', async t => {
 
   fs.writeFileSync(path.join(dataDir, 'devices.json'), JSON.stringify(devices, null, 2));
   fs.writeFileSync(path.join(dataDir, 'records.json'), JSON.stringify(records, null, 2));
+  // 用现网曾保存的简略模板启动，验证服务升级时会自动补全邮件正文。
+  fs.writeFileSync(path.join(dataDir, 'email-settings.json'), JSON.stringify({
+    enabled: false,
+    recipients: [],
+    smtp: { host: '', port: 465, security: 'ssl', username: '', secretEncrypted: '' },
+    subjectTemplate: '【设备管理】设备借出：{{deviceName}}',
+    bodyTemplate: '设备借出通知\n\n{{recordList}}',
+    templates: {
+      borrow: { subject: '【设备管理】设备借出：{{deviceName}}', body: '设备借出通知\n\n{{recordList}}' },
+      return: { subject: '【设备管理】用户归还：{{deviceName}}', body: '用户归还通知\n\n{{recordList}}' },
+      adminReturn: { subject: '【设备管理】管理员归还：{{deviceName}}', body: '管理员归还通知\n\n{{recordList}}' }
+    }
+  }, null, 2));
 
   const child = spawn(process.execPath, ['server.js'], {
     cwd: PROJECT_ROOT,
@@ -144,8 +175,8 @@ test('privacy and administrator record-management contract', async t => {
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
-  t.after(() => {
-    child.kill();
+  t.after(async () => {
+    await stopServer(child);
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
@@ -204,6 +235,13 @@ test('privacy and administrator record-management contract', async t => {
     const { response } = await request('/', { redirect: 'manual' });
     assert.equal(response.status, 302);
     assert.equal(response.headers.get('location'), '/borrow');
+  });
+
+  // 答案之书页面由同一前端入口提供，支持通知栏点击后的直接访问。
+  await t.test('answers book route serves the frontend entry', async () => {
+    const { response, body } = await request('/answers');
+    assert.equal(response.status, 200);
+    assert.match(body, /<div id="app"><\/div>/);
   });
 
   await t.test('public available-device list contains only online and returned equipment', async () => {
@@ -331,6 +369,25 @@ test('privacy and administrator record-management contract', async t => {
     assert.equal(body.data[0].major, '计算机学院');
   });
 
+  // 旧版内置简略模板读取后应直接显示完整的事件、明细、时间和备注结构。
+  await t.test('saved built-in short email templates are upgraded on read', async () => {
+    const { response, body } = await request('/api/admin/email-settings', {
+      headers: { 'x-session-id': sessionId }
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(body.data.templates.borrow.body, [
+      '设备借出通知', '', '事件：设备借出', '{{deviceNotice}}', '', '借用明细：', '{{recordList}}', '', '操作时间：{{eventAt}}'
+    ].join('\n'));
+    assert.equal(body.data.templates.return.body, [
+      '用户归还通知', '', '事件：用户归还', '{{deviceNotice}}', '', '归还明细：', '{{recordList}}', '', '归还时间：{{eventAt}}', '归还备注：{{returnNotes}}'
+    ].join('\n'));
+    assert.equal(body.data.templates.adminReturn.body, [
+      '管理员归还通知', '', '事件：管理员归还', '{{deviceNotice}}', '', '归还明细：', '{{recordList}}', '', '归还时间：{{eventAt}}', '归还备注：{{returnNotes}}'
+    ].join('\n'));
+    assert.equal(body.data.bodyTemplate, body.data.templates.borrow.body);
+  });
+
   await t.test('email settings require administrator access and never expose the SMTP secret', async () => {
     let result = await request('/api/admin/email-settings');
     assert.equal(result.response.status, 401);
@@ -361,9 +418,10 @@ test('privacy and administrator record-management contract', async t => {
     assert.equal('secret' in result.body.data.smtp, false);
     assert.equal('secretEncrypted' in result.body.data.smtp, false);
 
-    const storedSettings = fs.readFileSync(path.join(dataDir, 'email-settings.json'), 'utf8');
-    assert.doesNotMatch(storedSettings, /unit-test-secret/);
-    assert.match(storedSettings, /secretEncrypted/);
+    const storedSettings = readSqliteRows(dataDir, 'email_settings')[0];
+    assert.ok(storedSettings);
+    assert.doesNotMatch(JSON.stringify(storedSettings), /unit-test-secret/);
+    assert.ok(storedSettings.secret_encrypted);
 
     result = await request('/api/admin/email-settings', { headers: { 'x-session-id': sessionId } });
     assert.equal(result.response.status, 200);
@@ -421,7 +479,7 @@ test('privacy and administrator record-management contract', async t => {
 
   // 服务端重新校验全部行；任一行错误时整批不写入。
   await t.test('batch import rejects invalid rows atomically', async () => {
-    const before = JSON.parse(fs.readFileSync(path.join(dataDir, 'devices.json'), 'utf8'));
+    const before = readSqliteRows(dataDir, 'devices');
     const { response, body } = await request('/api/devices/batch-import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
@@ -432,7 +490,7 @@ test('privacy and administrator record-management contract', async t => {
         ]
       })
     });
-    const after = JSON.parse(fs.readFileSync(path.join(dataDir, 'devices.json'), 'utf8'));
+    const after = readSqliteRows(dataDir, 'devices');
     assert.equal(response.status, 400);
     assert.equal(body.success, false);
     assert.ok(Array.isArray(body.errors));
@@ -459,7 +517,7 @@ test('privacy and administrator record-management contract', async t => {
     assert.equal(body.data.devices.every(device => device.operationalStatus === 'online'), true);
     assert.equal(body.data.devices.every(device => device.image === null), true);
 
-    const logs = JSON.parse(fs.readFileSync(path.join(dataDir, 'operation-logs.json'), 'utf8'));
+    const logs = readSqliteRows(dataDir, 'operation_logs');
     assert.equal(logs.length, 1);
     assert.equal(logs[0].action, 'devices_batch_imported');
     assert.match(logs[0].summary, /批量导入 2 台设备/);
@@ -806,6 +864,85 @@ test('privacy and administrator record-management contract', async t => {
     });
     assert.equal(result.response.status, 400);
     assert.equal(result.body.message, '姓名、完整手机号、专业和用途均为必填项');
+  });
+
+  // 其他设备回归契约：写入普通借用记录，但不能修改设备库存文件。
+  await t.test('other device borrowing creates a normal record and can be returned without inventory changes', async () => {
+    const beforeDevices = readSqliteRows(dataDir, 'devices');
+    let result = await request('/api/records/borrow-other', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        otherDeviceName: '无线领夹麦克风',
+        borrowerName: '其他设备用户',
+        borrowerId: '2024010111',
+        borrowerPhone: '13500001111',
+        major: '网络安全',
+        purpose: '课堂录音'
+      })
+    });
+
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.success, true);
+    assert.equal(result.body.data.deviceId, null);
+    assert.equal(result.body.data.deviceName, '无线领夹麦克风');
+    assert.equal(result.body.data.isOtherDevice, true);
+
+    const active = await request('/api/records/active', {
+      headers: { 'x-session-id': sessionId }
+    });
+    assert.equal(active.response.status, 200);
+    assert.ok(active.body.data.some(record => record.id === result.body.data.id && record.isOtherDevice === true));
+
+    result = await request('/api/records/return-lookup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ borrowerName: '其他设备用户', borrowerPhone: '13500001111' })
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.data.records.length, 1);
+    assert.equal(result.body.data.records[0].deviceName, '无线领夹麦克风');
+    assert.equal(result.body.data.records[0].isOtherDevice, true);
+
+    const returned = await request('/api/records/return', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recordId: result.body.data.records[0].recordId,
+        returnToken: result.body.data.returnToken,
+        notes: '设备已归还'
+      })
+    });
+    assert.equal(returned.response.status, 200);
+    assert.equal(returned.body.success, true);
+    assert.deepEqual(readSqliteRows(dataDir, 'devices'), beforeDevices);
+  });
+
+  // 其他设备回归契约：管理员强制归还只结束借用记录，不要求库存中存在对应设备。
+  await t.test('administrator can force-return an other device without inventory changes', async () => {
+    const beforeDevices = readSqliteRows(dataDir, 'devices');
+    const borrowed = await request('/api/records/borrow-other', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        otherDeviceName: '便携式投影仪',
+        borrowerName: '管理员归还用户',
+        borrowerPhone: '13600001111',
+        major: '网络安全',
+        purpose: '社团活动'
+      })
+    });
+    assert.equal(borrowed.response.status, 200);
+
+    const forced = await request('/api/records/' + borrowed.body.data.id + '/force-return', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
+      body: JSON.stringify({ notes: '管理员已确认归还' })
+    });
+    assert.equal(forced.response.status, 200);
+    assert.equal(forced.body.success, true);
+    assert.equal(forced.body.data.isOtherDevice, true);
+    assert.deepEqual(readSqliteRows(dataDir, 'devices'), beforeDevices);
   });
 
   // 用户批量归还契约：查询凭证覆盖多台记录，统一备注一次归还；单台异常不影响其他设备。
@@ -1367,8 +1504,8 @@ test('privacy and administrator record-management contract', async t => {
 
   // 批量状态必须整批校验；借出设备会阻止批量下线，上线会清空离线原因。
   await t.test('batch status changes are atomic and log one summary per action', async () => {
-    const beforeDevices = JSON.parse(fs.readFileSync(path.join(dataDir, 'devices.json'), 'utf8'));
-    const beforeLogs = JSON.parse(fs.readFileSync(path.join(dataDir, 'operation-logs.json'), 'utf8'));
+    const beforeDevices = readSqliteRows(dataDir, 'devices');
+    const beforeLogs = readSqliteRows(dataDir, 'operation_logs');
     let result = await request('/api/devices/batch-operational-status', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
@@ -1377,7 +1514,7 @@ test('privacy and administrator record-management contract', async t => {
     assert.equal(result.response.status, 409);
     assert.equal(result.body.success, false);
     assert.ok(result.body.errors.some(error => error.deviceId === 'DEV_BORROWED'));
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dataDir, 'devices.json'), 'utf8')), beforeDevices);
+    assert.deepEqual(readSqliteRows(dataDir, 'devices'), beforeDevices);
 
     result = await request('/api/devices/batch-operational-status', {
       method: 'PUT',
@@ -1388,7 +1525,7 @@ test('privacy and administrator record-management contract', async t => {
     assert.equal(result.body.success, true);
     assert.equal(result.body.data.count, 1);
     assert.equal(result.body.data.devices[0].offlineReason, '批量检修');
-    const afterLogs = JSON.parse(fs.readFileSync(path.join(dataDir, 'operation-logs.json'), 'utf8'));
+    const afterLogs = readSqliteRows(dataDir, 'operation_logs');
     assert.equal(afterLogs.length, beforeLogs.length + 1);
     assert.equal(afterLogs.at(-1).action, 'devices_batch_offlined');
     assert.match(afterLogs.at(-1).summary, /批量下线 1 台设备/);
@@ -1401,7 +1538,7 @@ test('privacy and administrator record-management contract', async t => {
     assert.equal(result.response.status, 200);
     assert.equal(result.body.data.devices[0].operationalStatus, 'online');
     assert.equal(result.body.data.devices[0].offlineReason, '');
-    const onlineLogs = JSON.parse(fs.readFileSync(path.join(dataDir, 'operation-logs.json'), 'utf8'));
+    const onlineLogs = readSqliteRows(dataDir, 'operation_logs');
     assert.equal(onlineLogs.length, beforeLogs.length + 2);
     assert.equal(onlineLogs.at(-1).action, 'devices_batch_onlined');
     assert.match(onlineLogs.at(-1).summary, /批量上线 1 台设备/);
@@ -1409,8 +1546,8 @@ test('privacy and administrator record-management contract', async t => {
 
   // 批量分类必须验证目标分类和全部设备，成功时只写一条汇总日志。
   await t.test('batch categorization is atomic and logs one summary', async () => {
-    const beforeDevices = JSON.parse(fs.readFileSync(path.join(dataDir, 'devices.json'), 'utf8'));
-    const beforeLogs = JSON.parse(fs.readFileSync(path.join(dataDir, 'operation-logs.json'), 'utf8'));
+    const beforeDevices = readSqliteRows(dataDir, 'devices');
+    const beforeLogs = readSqliteRows(dataDir, 'operation_logs');
     let result = await request('/api/devices/batch-category', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
@@ -1418,7 +1555,7 @@ test('privacy and administrator record-management contract', async t => {
     });
     assert.equal(result.response.status, 400);
     assert.equal(result.body.success, false);
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dataDir, 'devices.json'), 'utf8')), beforeDevices);
+    assert.deepEqual(readSqliteRows(dataDir, 'devices'), beforeDevices);
 
     result = await request('/api/devices/batch-category', {
       method: 'PUT',
@@ -1427,7 +1564,7 @@ test('privacy and administrator record-management contract', async t => {
     });
     assert.equal(result.response.status, 409);
     assert.equal(result.body.success, false);
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dataDir, 'devices.json'), 'utf8')), beforeDevices);
+    assert.deepEqual(readSqliteRows(dataDir, 'devices'), beforeDevices);
 
     result = await request('/api/devices/batch-category', {
       method: 'PUT',
@@ -1438,7 +1575,7 @@ test('privacy and administrator record-management contract', async t => {
     assert.equal(result.body.success, true);
     assert.equal(result.body.data.count, 2);
     assert.ok(result.body.data.devices.every(device => device.category === 'cat-lens'));
-    const afterLogs = JSON.parse(fs.readFileSync(path.join(dataDir, 'operation-logs.json'), 'utf8'));
+    const afterLogs = readSqliteRows(dataDir, 'operation_logs');
     assert.equal(afterLogs.length, beforeLogs.length + 1);
     assert.equal(afterLogs.at(-1).action, 'devices_batch_categorized');
     assert.match(afterLogs.at(-1).summary, /批量分类 2 台设备/);

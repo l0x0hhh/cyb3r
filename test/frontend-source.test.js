@@ -81,6 +81,78 @@ test('return page queries by exact name and full phone before returning', () => 
   assert.match(borrowPageSource, /\/api\/records\/return/);
 });
 
+// 答案之书彩蛋契约：归还成功后可从非阻塞反馈进入独立的答案页。
+test('successful returns expose an answers-book action and the standalone route', () => {
+  assert.match(borrowPageSource, /showActionFeedback\('设备已归舱',[\s\S]*答案之书/);
+  assert.match(borrowPageSource, /actionFeedback\.action/);
+  assert.match(borrowPageSource, /href: '\/answers'/);
+  assert.match(source, /const AnswersPage = \{/);
+  assert.match(source, /const isAnswersPage = path === '\/answers'/);
+  assert.match(source, /<AnswersPage v-else-if="isAnswers" \/>/);
+});
+
+// 答案页契约：本地答案池支持首次抽取、再抽一次和返回借还页。
+test('answers book supports drawing another local answer without an API', () => {
+  const answersSource = source.slice(
+    source.indexOf('const AnswersPage'),
+    source.indexOf('// ==================== 管理后台组件')
+  );
+  assert.match(answersSource, /答案之书/);
+  assert.match(answersSource, /drawAnswer/);
+  assert.match(answersSource, /再抽一次/);
+  assert.match(answersSource, /href="\/borrow"/);
+  assert.doesNotMatch(answersSource, /apiCall\(/);
+});
+
+// 参考站点视觉契约：初始页、翻书态和结果态使用相同的核心文案与操作。
+test('answers book mirrors the reference page copy and interaction states', () => {
+  const answersSource = source.slice(
+    source.indexOf('const AnswersPage'),
+    source.indexOf('// ==================== 管理后台组件')
+  );
+  assert.match(answersSource, /<span>答案之书<\/span>/);
+  assert.match(answersSource, /在犹豫不决时，找到内心的答案/);
+  assert.match(answersSource, /在心中思考一个问题，点击答案之书探索可能的答案/);
+  assert.match(answersSource, /正在翻书/);
+  assert.match(answersSource, /发给朋友/);
+  assert.match(answersSource, /再抽一次/);
+  assert.match(answersSource, /文案已复制，快发给朋友咯/);
+  assert.match(answersSource, /copyAnswer/);
+  assert.match(answersSource, /src="\/assets\/answer-book\.png"/);
+  assert.ok(fs.existsSync(path.resolve(__dirname, '../public/assets/answer-book.png')));
+});
+
+// 答案页回归契约：长答案不能溢出结果区，再抽一次回到答案首页。
+test('answers result fits the stage and retry returns to the home page', () => {
+  const answersSource = source.slice(
+    source.indexOf('const AnswersPage'),
+    source.indexOf('// ==================== 管理后台组件')
+  );
+  assert.match(answersSource, /<a href="\/answers" class="answers-retry-button">再抽一次<\/a>/);
+  assert.doesNotMatch(answersSource, /class="answers-retry-button"[^>]*@click="drawAnswer"/);
+  assert.match(documentSource, /\.answers-result__quote \{[^}]*max-width: min\(100%, 960px\);[^}]*white-space: normal;/);
+});
+
+// 答案页导航契约：右上角始终保留返回借还页面的文字入口。
+test('answers page exposes an upper-right return-to-borrow link', () => {
+  const answersSource = source.slice(
+    source.indexOf('const AnswersPage'),
+    source.indexOf('// ==================== 管理后台组件')
+  );
+  assert.match(answersSource, /<a href="\/borrow" class="answers-back-link">返回借还<\/a>/);
+  assert.match(documentSource, /\.answers-back-link\s*\{[^}]*position:\s*absolute;[^}]*top:[^}]*right:/s);
+});
+
+// 答案页背景契约：根滚动条槽位也必须保持白色，不能露出借还页的米白底色。
+test('answers page keeps the full viewport white around the stable scrollbar gutter', () => {
+  const answersSource = source.slice(
+    source.indexOf('const AnswersPage'),
+    source.indexOf('// ==================== 管理后台组件')
+  );
+  assert.match(answersSource, /document\.documentElement\.classList\.add\('answers-route'\)/);
+  assert.match(documentSource, /html\.answers-route,\s*body\.answers-route\s*\{[^}]*background:\s*#fff;[^}]*background-image:\s*none;/s);
+});
+
 test('borrowing form requires professional major and purpose fields', () => {
   assert.match(borrowPageSource, /form\.major/);
   assert.match(borrowPageSource, /form\.purpose/);
@@ -89,6 +161,15 @@ test('borrowing form requires professional major and purpose fields', () => {
   assert.match(borrowPageSource, /placeholder="如：网络空间安全"/);
   assert.doesNotMatch(borrowPageSource, /数字媒体技术/);
   assert.doesNotMatch(borrowPageSource, /院系 \/ 实验室/);
+});
+
+// 其他设备契约：用户可填写未录入库存的设备，仍调用普通借用记录接口。
+test('borrow portal supports borrowing an unlisted other device', () => {
+  assert.match(borrowPageSource, /其他设备/);
+  assert.match(borrowPageSource, /showOtherBorrowForm/);
+  assert.match(borrowPageSource, /otherDeviceName/);
+  assert.match(borrowPageSource, /\/api\/records\/borrow-other/);
+  assert.match(source, /isOtherDevice/);
 });
 
 test('public and administrator pages identify the JNU Cyber Security School', () => {
@@ -262,6 +343,7 @@ test('administrator UI exposes active-record edit and force-return actions', () 
   assert.match(source, /editActiveRecord/);
   assert.match(source, /forceReturnRecord/);
   assert.match(source, /\/api\/records\/.*force-return/);
+  assert.match(source, /待上线设备/);
 });
 
 test('offline confirmation happens before the optional reason prompt', () => {
@@ -595,6 +677,9 @@ test('administrator can configure encrypted SMTP notifications and event rules',
   assert.match(source, /用户归还：\{\{deviceName\}\}/);
   assert.match(source, /管理员归还：\{\{deviceName\}\}/);
   assert.match(source, /templates:\s*\{\s*borrow:/);
+  assert.ok(source.includes("'借用明细：', '{{recordList}}'"));
+  assert.ok(source.includes("'归还明细：', '{{recordList}}'"));
+  assert.ok(source.includes("'归还备注：{{returnNotes}}'"));
   assert.match(source, /maskSensitiveData/);
   assert.match(source, /emailTemplateFields/);
   assert.match(source, /borrowerPhoneMasked/);
@@ -906,4 +991,12 @@ test('administrator supports batch force-return of active records', () => {
 // 邮件模板契约：批量设备清单由既有 {{deviceName}}/{{deviceModel}} 字段渲染，不新增变量。
 test('email template editor does not add a separate batch device list variable', () => {
   assert.doesNotMatch(source, /deviceList/);
+});
+
+// 邮件模板契约：新变量可插入编辑器，并在默认模板中拆分待上线提醒与批量明细。
+test('email template editor exposes device reminder and grouped record variables', () => {
+  assert.match(source, /key: 'deviceNotice', label: '待上线提醒'/);
+  assert.match(source, /key: 'recordList', label: '借用明细'/);
+  assert.match(source, /\{\{deviceNotice\}\}/);
+  assert.match(source, /\{\{recordList\}\}/);
 });

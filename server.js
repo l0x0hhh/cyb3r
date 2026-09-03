@@ -1,4 +1,4 @@
-// 管理员分级与图片选区展示：账户持久化使用 scrypt 哈希，并兼容旧的像素高度字段。
+// SQLite 运行时切换：保留既有接口对象格式，业务数据统一通过适配层持久化。
 const express = require('express');
 const helmet = require('helmet');
 const { rateLimit } = require('express-rate-limit');
@@ -9,6 +9,7 @@ const { sendSmtpMail } = require('./email-service');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { createSqliteStore } = require('./db/repository');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -47,6 +48,32 @@ const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 const OPERATION_LOGS_FILE = path.join(DATA_DIR, 'operation-logs.json');
 const EMAIL_SETTINGS_FILE = path.join(DATA_DIR, 'email-settings.json');
 const ADMIN_USERS_FILE = path.join(DATA_DIR, 'admin-users.json');
+// 内置邮件正文采用统一完整结构；识别到历史简略版本时在读取阶段自动升级。
+const DEFAULT_EMAIL_TEMPLATE_BODIES = {
+  borrow: [
+    '设备借出通知', '',
+    '事件：设备借出', '{{deviceNotice}}', '',
+    '借用明细：', '{{recordList}}', '',
+    '操作时间：{{eventAt}}'
+  ].join('\n'),
+  return: [
+    '用户归还通知', '',
+    '事件：用户归还', '{{deviceNotice}}', '',
+    '归还明细：', '{{recordList}}', '',
+    '归还时间：{{eventAt}}', '归还备注：{{returnNotes}}'
+  ].join('\n'),
+  adminReturn: [
+    '管理员归还通知', '',
+    '事件：管理员归还', '{{deviceNotice}}', '',
+    '归还明细：', '{{recordList}}', '',
+    '归还时间：{{eventAt}}', '归还备注：{{returnNotes}}'
+  ].join('\n')
+};
+const BUILT_IN_SHORT_EMAIL_TEMPLATE_BODIES = {
+  borrow: '设备借出通知\n\n{{recordList}}',
+  return: '用户归还通知\n\n{{recordList}}',
+  adminReturn: '管理员归还通知\n\n{{recordList}}'
+};
 const DEFAULT_EMAIL_SETTINGS = {
   enabled: false,
   // 邮件默认只展示脱敏个人信息，管理员确认风险后才可切换为完整信息。
@@ -58,40 +85,20 @@ const DEFAULT_EMAIL_SETTINGS = {
   smtp: { host: '', port: 465, security: 'ssl', username: '', secretEncrypted: '' },
   // 兼容旧字段：升级前的部署只有 subjectTemplate/bodyTemplate，始终与借出模板保持一致。
   subjectTemplate: '【设备管理】设备借出：{{deviceName}}',
-  bodyTemplate: [
-    '设备借出通知', '',
-    '事件：设备借出', '设备名称：{{deviceName}}', '设备型号：{{deviceModel}}', '设备编号：{{deviceId}}',
-    '借用人：{{borrowerName}}', '联系电话：{{borrowerPhoneMasked}}', '专业/部门：{{major}}',
-    '借用用途：{{purpose}}', '借用时间：{{borrowedAt}}', '操作时间：{{eventAt}}'
-  ].join('\n'),
+  bodyTemplate: DEFAULT_EMAIL_TEMPLATE_BODIES.borrow,
   // 三套事件各自独立的主题和正文；事件名写死，其余字段继续使用变量。
   templates: {
     borrow: {
       subject: '【设备管理】设备借出：{{deviceName}}',
-      body: [
-        '设备借出通知', '',
-        '事件：设备借出', '设备名称：{{deviceName}}', '设备型号：{{deviceModel}}', '设备编号：{{deviceId}}',
-        '借用人：{{borrowerName}}', '联系电话：{{borrowerPhoneMasked}}', '专业/部门：{{major}}',
-        '借用用途：{{purpose}}', '借用时间：{{borrowedAt}}', '操作时间：{{eventAt}}'
-      ].join('\n')
+      body: DEFAULT_EMAIL_TEMPLATE_BODIES.borrow
     },
     return: {
       subject: '【设备管理】用户归还：{{deviceName}}',
-      body: [
-        '用户归还通知', '',
-        '事件：用户归还', '设备名称：{{deviceName}}', '设备型号：{{deviceModel}}', '设备编号：{{deviceId}}',
-        '借用人：{{borrowerName}}', '联系电话：{{borrowerPhoneMasked}}', '专业/部门：{{major}}',
-        '借用用途：{{purpose}}', '借用时间：{{borrowedAt}}', '归还时间：{{eventAt}}', '归还备注：{{returnNotes}}'
-      ].join('\n')
+      body: DEFAULT_EMAIL_TEMPLATE_BODIES.return
     },
     adminReturn: {
       subject: '【设备管理】管理员归还：{{deviceName}}',
-      body: [
-        '管理员归还通知', '',
-        '事件：管理员归还', '设备名称：{{deviceName}}', '设备型号：{{deviceModel}}', '设备编号：{{deviceId}}',
-        '借用人：{{borrowerName}}', '联系电话：{{borrowerPhoneMasked}}', '专业/部门：{{major}}',
-        '借用用途：{{purpose}}', '借用时间：{{borrowedAt}}', '归还时间：{{eventAt}}', '归还备注：{{returnNotes}}'
-      ].join('\n')
+      body: DEFAULT_EMAIL_TEMPLATE_BODIES.adminReturn
     }
   }
 };
@@ -110,6 +117,18 @@ initDataFile(CATEGORIES_FILE, [
   { id: 'cat-microphone', name: '麦克风', icon: 'microphone', sortOrder: 4 },
   { id: 'cat-other', name: '其他', icon: 'other', sortOrder: 5 }
 ]);
+
+const SQLITE_FILE = process.env.DATABASE_PATH
+  ? path.resolve(process.env.DATABASE_PATH)
+  : path.join(DATA_DIR, 'device-management.sqlite');
+// 首次启动仅从现有 JSON 创建 SQLite；SQLite 已存在时不会重新导入，避免数据回退或分叉。
+const DATA_STORE = createSqliteStore({ dataDir: DATA_DIR, databasePath: SQLITE_FILE });
+try { fs.chmodSync(DATA_STORE.databasePath, 0o600); } catch { /* Windows 和受限挂载目录可能不支持 chmod。 */ }
+// 服务退出前释放 SQLite 句柄，避免 WAL 文件和数据库被进程锁住。
+const closeDataStore = () => DATA_STORE.close();
+process.once('exit', closeDataStore);
+process.once('SIGTERM', () => { closeDataStore(); process.exit(0); });
+process.once('SIGINT', () => { closeDataStore(); process.exit(0); });
 
 function isKnownCategoryId(categoryId) {
   return readJSON(CATEGORIES_FILE).some(category => category.id === categoryId);
@@ -292,11 +311,10 @@ async function optimizeUploadedImage(req, res, next) {
 
 // ==================== 工具函数 ====================
 function readJSON(filePath) {
-  try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); }
-  catch { return []; }
+  return DATA_STORE.readCollection(filePath);
 }
 function writeJSON(filePath, data) {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  DATA_STORE.writeCollection(filePath, data);
 }
 
 // 管理员账户模型：超级管理员拥有全部功能，普通管理员使用明确的权限白名单。
@@ -340,7 +358,7 @@ function toPublicAdminUser(user) {
 
 function writeAdminUsers(users) {
   writeJSON(ADMIN_USERS_FILE, users);
-  try { fs.chmodSync(ADMIN_USERS_FILE, 0o600); } catch { /* Windows and restricted filesystems may reject chmod. */ }
+  try { fs.chmodSync(DATA_STORE.databasePath, 0o600); } catch { /* Windows and restricted filesystems may reject chmod. */ }
 }
 
 function ensureAdminUsers() {
@@ -405,7 +423,7 @@ const EMAIL_EVENTS = {
 const EMAIL_TEMPLATE_VARIABLES = new Set([
   'eventLabel', 'deviceName', 'deviceModel', 'deviceId', 'borrowerName', 'borrowerId',
   'borrowerNameMasked', 'borrowerIdMasked', 'borrowerPhone', 'borrowerPhoneMasked',
-  'major', 'purpose', 'borrowedAt', 'eventAt', 'returnNotes'
+  'major', 'purpose', 'borrowedAt', 'eventAt', 'returnNotes', 'deviceNotice', 'recordList'
 ]);
 const EMAIL_ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -413,28 +431,43 @@ function cloneEmailSettings(settings = DEFAULT_EMAIL_SETTINGS) {
   return JSON.parse(JSON.stringify(settings));
 }
 
+function isBuiltInShortEmailTemplateBody(eventType, body) {
+  const expected = BUILT_IN_SHORT_EMAIL_TEMPLATE_BODIES[eventType];
+  return Boolean(expected) && String(body || '').replace(/\r\n/g, '\n').trim() === expected;
+}
+
 function readEmailSettings() {
   const stored = readJSON(EMAIL_SETTINGS_FILE);
   const source = stored && !Array.isArray(stored) ? stored : {};
   const defaults = cloneEmailSettings();
   const storedTemplates = source.templates && !Array.isArray(source.templates) ? source.templates : {};
+  const templates = {};
+  for (const eventType of Object.keys(defaults.templates)) {
+    const storedTemplate = storedTemplates[eventType] && !Array.isArray(storedTemplates[eventType]) ? storedTemplates[eventType] : {};
+    templates[eventType] = {
+      ...defaults.templates[eventType],
+      ...storedTemplate,
+      ...(isBuiltInShortEmailTemplateBody(eventType, storedTemplate.body)
+        ? { body: DEFAULT_EMAIL_TEMPLATE_BODIES[eventType] }
+        : {})
+    };
+  }
   return {
     ...defaults,
     ...source,
     smtp: { ...defaults.smtp, ...(source.smtp || {}) },
     recipients: Array.isArray(source.recipients) ? source.recipients : defaults.recipients,
+    bodyTemplate: isBuiltInShortEmailTemplateBody('borrow', source.bodyTemplate)
+      ? templates.borrow.body
+      : (source.bodyTemplate || defaults.bodyTemplate),
     // 事件级合并默认模板，旧部署缺少 templates 或只存部分事件时不会丢默认值。
-    templates: {
-      borrow: { ...defaults.templates?.borrow, ...(storedTemplates.borrow || {}) },
-      return: { ...defaults.templates?.return, ...(storedTemplates.return || {}) },
-      adminReturn: { ...defaults.templates?.adminReturn, ...(storedTemplates.adminReturn || {}) }
-    }
+    templates
   };
 }
 
 function writeEmailSettings(settings) {
   writeJSON(EMAIL_SETTINGS_FILE, settings);
-  try { fs.chmodSync(EMAIL_SETTINGS_FILE, 0o600); } catch { /* Windows 和部分挂载目录不支持 chmod。 */ }
+  try { fs.chmodSync(DATA_STORE.databasePath, 0o600); } catch { /* Windows 和部分挂载目录不支持 chmod。 */ }
 }
 
 // 开发环境内置密钥：未配置 EMAIL_CONFIG_KEY 时，仅非生产环境回退到固定开发密钥以便本地测试邮件；
@@ -622,6 +655,11 @@ function formatEmailTemplate(template, values) {
   return String(template).replace(/\{\{([^{}]+)\}\}/g, (_, variable) => String(values[variable.trim()] ?? ''));
 }
 
+// 模板变量检查集中处理，确保新旧模板的兼容补充逻辑使用同一判断规则。
+function hasEmailVariable(template, variable) {
+  return new RegExp(`\\{\\{\\s*${variable}\\s*\\}\\}`).test(String(template || ''));
+}
+
 function maskIdentifier(identifier) {
   const value = String(identifier || '').trim();
   if (!value) return '';
@@ -647,9 +685,10 @@ function buildEmailValues(eventType, record, settings = DEFAULT_EMAIL_SETTINGS) 
   const borrowerPhone = String(record.borrowerPhone || '');
   return {
     eventLabel: event.label,
-    deviceName: String(record.deviceName || '未知设备'),
-    deviceModel: String(record.deviceModel || ''),
+    deviceName: getEmailDeviceName(record),
+    deviceModel: getEmailDeviceModel(record),
     deviceId: String(record.deviceId || ''),
+    deviceNotice: getEmailDeviceNotice(record),
     borrowerName: maskSensitiveData ? maskName(borrowerName) : borrowerName,
     borrowerId: maskSensitiveData ? maskIdentifier(borrowerId) : borrowerId,
     borrowerNameMasked: maskName(borrowerName),
@@ -660,7 +699,8 @@ function buildEmailValues(eventType, record, settings = DEFAULT_EMAIL_SETTINGS) 
     purpose: getRecordPurpose(record),
     borrowedAt: formatEmailTime(record.createdAt),
     eventAt: formatEmailTime(record.returnedAt || new Date().toISOString()),
-    returnNotes: String(record.returnNotes || '')
+    returnNotes: String(record.returnNotes || ''),
+    recordList: ''
   };
 }
 
@@ -675,9 +715,15 @@ function queueEmailNotification(eventType, record) {
     return;
   }
   const values = buildEmailValues(eventType, record, settings);
+  // 单台邮件也提供明细变量，让新模板在单台和批量场景下都能复用。
+  values.recordList = formatEmailRecordGroup(eventType, [record], settings);
   const template = resolveEventTemplate(settings, eventType);
   const subject = formatEmailTemplate(template.subject, values);
-  const text = formatEmailTemplate(template.body, values);
+  let text = formatEmailTemplate(template.body, values);
+  // 旧模板没有待上线提醒变量时，自动补一行提醒且只补一次。
+  if (values.deviceNotice && !hasEmailVariable(template.body, 'deviceNotice')) {
+    text += `\n\n${values.deviceNotice}`;
+  }
   void sendSmtpMail({
     smtp: settings.smtp,
     secret,
@@ -689,19 +735,71 @@ function queueEmailNotification(eventType, record) {
   });
 }
 
-// 批量事件只发一封汇总邮件：借用信息取第一条记录，设备名称/型号/编号顿号拼接，
-// 模板中的 {{deviceName}}/{{deviceModel}}/{{deviceId}} 直接渲染出完整清单，无需新增变量。
+// 批量事件只发一封汇总邮件；新模板使用逐组明细，旧模板继续通过既有字段兼容清单。
 function queueBatchEmailNotification(eventType, records) {
   const list = (records || []).filter(Boolean);
   if (!list.length) return;
+  const settings = readEmailSettings();
+  const event = EMAIL_EVENTS[eventType];
+  if (!event || !settings.enabled || !settings[event.setting] || !settings.recipients.length) return;
+  const secret = decryptEmailSecret(settings.smtp.secretEncrypted);
+  if (!secret) {
+    console.error('[email] SMTP 凭据无法解密，已跳过邮件通知');
+    return;
+  }
+
+  const template = resolveEventTemplate(settings, eventType);
+  const groupMap = new Map();
+  for (const record of list) {
+    const key = [record.borrowerName, record.borrowerId, record.borrowerPhone].map(value => String(value || '')).join('\u0000');
+    if (!groupMap.has(key)) groupMap.set(key, []);
+    groupMap.get(key).push(record);
+  }
+  const groups = [...groupMap.values()];
   const first = list[0];
   const summary = {
     ...first,
+    isOtherDevice: false,
     deviceName: list.map(record => String(record.deviceName || '未知设备')).join('、'),
-    deviceModel: list.map(record => String(record.deviceModel || '')).join('、'),
-    deviceId: list.map(record => String(record.deviceId || '')).join('、')
+    deviceModel: list.map(getEmailDeviceModel).join('、'),
+    deviceId: list.map(record => String(record.deviceId || '未分配编号')).join('、'),
+    deviceNotice: list.filter(record => record.isOtherDevice === true).length
+      ? '记得有时间上线这个设备喔'
+      : '',
+    recordList: groups.map(group => formatEmailRecordGroup(eventType, group, settings)).join('\n\n')
   };
-  queueEmailNotification(eventType, summary);
+  const values = buildEmailValues(eventType, summary, settings);
+  values.deviceNotice = summary.deviceNotice;
+  values.recordList = summary.recordList;
+  // 多个借用人使用中性占位语，避免旧模板把第一人展示成整批记录的唯一借用人。
+  if (groups.length > 1) {
+    const detailHint = '见下方分组明细';
+    values.borrowerName = '多人（详见下方明细）';
+    values.borrowerNameMasked = values.borrowerName;
+    values.borrowerId = detailHint;
+    values.borrowerIdMasked = detailHint;
+    values.borrowerPhone = detailHint;
+    values.borrowerPhoneMasked = detailHint;
+    values.major = detailHint;
+    values.purpose = detailHint;
+  }
+  const hasRecordList = /\{\{\s*recordList\s*\}\}/.test(template.body);
+  const subject = formatEmailTemplate(template.subject, values);
+  let text = formatEmailTemplate(template.body, values);
+  const extraSections = [];
+  if (summary.deviceNotice && !hasEmailVariable(template.body, 'deviceNotice')) {
+    extraSections.push(summary.deviceNotice);
+  }
+  if (!hasRecordList) {
+    const detailLabel = eventType === 'borrow' ? '借用' : '归还';
+    extraSections.push(`${detailLabel}明细：\n${summary.recordList}`);
+  }
+  if (extraSections.length) {
+    text += `\n\n${extraSections.join('\n\n')}`;
+  }
+  void sendSmtpMail({ smtp: settings.smtp, secret, recipients: settings.recipients, subject, text }).catch(error => {
+    console.error(`[email] ${event.label}通知发送失败：${error.message}`);
+  });
 }
 
 // 操作日志只保存设备动作元数据，禁止传入借用人姓名、电话等隐私字段。
@@ -762,6 +860,44 @@ function getRecordPurpose(record) {
   return String(record?.purpose ?? record?.notes ?? '').trim();
 }
 
+// 邮件中不再把提醒文字拼进设备名称；型号为空时给出可执行的补充提示。
+const EMAIL_MISSING_MODEL = '暂未录入（待管理员上线后补充）';
+const EMAIL_MISSING_DEVICE_ID = '待管理员上线后生成';
+const EMAIL_OTHER_DEVICE_NOTICE = '记得有时间上线这个设备喔';
+
+function getEmailDeviceName(record) {
+  const deviceName = String(record?.deviceName || '未知设备');
+  return deviceName.trim() || '未知设备';
+}
+
+function getEmailDeviceModel(record) {
+  const deviceModel = String(record?.deviceModel || '').trim();
+  return deviceModel || EMAIL_MISSING_MODEL;
+}
+
+function getEmailDeviceNotice(record) {
+  return record?.isOtherDevice === true ? EMAIL_OTHER_DEVICE_NOTICE : '';
+}
+
+function formatEmailRecordGroup(eventType, records, settings) {
+  const list = (records || []).filter(Boolean);
+  if (!list.length) return '';
+  const firstValues = buildEmailValues(eventType, list[0], settings);
+  const lines = [
+    `借用人：${firstValues.borrowerName || '-'}`,
+    `联系电话：${firstValues.borrowerPhone || '-'}`
+  ];
+  if (firstValues.major) lines.push(`专业/部门：${firstValues.major}`);
+  if (firstValues.purpose) lines.push(`借用用途：${firstValues.purpose}`);
+  lines.push('设备明细：');
+  list.forEach((record, index) => {
+    const values = buildEmailValues(eventType, record, settings);
+    const deviceId = values.deviceId || EMAIL_MISSING_DEVICE_ID;
+    lines.push(`${index + 1}. ${values.deviceName}（型号：${values.deviceModel}，编号：${deviceId}）`);
+  });
+  return lines.join('\n');
+}
+
 function withDeviceCompatibility(device) {
   return {
     ...device,
@@ -797,14 +933,18 @@ function buildBorrowingStatistics(records, devices, requestedRange) {
   const deviceUsage = new Map();
   const trendCounts = new Map();
   for (const record of borrowRecords) {
-    const current = deviceUsage.get(record.deviceId) || {
+    const usageKey = record.isOtherDevice === true
+      ? `other:${String(record.deviceName || '未知设备')}`
+      : `device:${String(record.deviceId || '')}`;
+    const current = deviceUsage.get(usageKey) || {
       deviceId: record.deviceId,
       deviceName: record.deviceName || '未知设备',
       deviceModel: record.deviceModel || '',
+      isOtherDevice: record.isOtherDevice === true,
       borrowCount: 0
     };
     current.borrowCount += 1;
-    deviceUsage.set(record.deviceId, current);
+    deviceUsage.set(usageKey, current);
 
     const date = new Date(record.createdAt).toISOString().slice(0, 10);
     trendCounts.set(date, (trendCounts.get(date) || 0) + 1);
@@ -826,7 +966,7 @@ function buildBorrowingStatistics(records, devices, requestedRange) {
       .map(([date, borrowCount]) => ({ date, borrowCount }));
   }
 
-  const usedDeviceCount = deviceUsage.size;
+  const usedDeviceCount = [...deviceUsage.values()].filter(item => !item.isOtherDevice).length;
   const deviceCount = devices.length;
   return {
     range,
@@ -1071,9 +1211,6 @@ app.delete('/api/categories/:id', requireAdminPermission('categories'), (req, re
     categories.forEach((category, index) => {
       category.sortOrder = index + 1;
     });
-    writeJSON(CATEGORIES_FILE, categories);
-
-    // 将该分类下的设备迁移到 cat-other
     const devices = readJSON(DEVICES_FILE);
     let changed = false;
     devices.forEach(d => {
@@ -1082,7 +1219,11 @@ app.delete('/api/categories/:id', requireAdminPermission('categories'), (req, re
         changed = true;
       }
     });
-    if (changed) writeJSON(DEVICES_FILE, devices);
+    DATA_STORE.transaction(() => {
+      writeJSON(CATEGORIES_FILE, categories);
+      // 将该分类下的设备迁移到 cat-other
+      if (changed) writeJSON(DEVICES_FILE, devices);
+    });
 
     res.json({ success: true, message: '删除成功' });
   } catch (e) {
@@ -1150,12 +1291,14 @@ app.post('/api/devices/batch-import', requireAdminPermission('devices'), (req, r
       offlineReason: '',
       createdAt
     }));
-    writeJSON(DEVICES_FILE, devices.concat(importedDevices));
-    appendOperationLog(
-      'devices_batch_imported',
-      { id: 'batch', name: '批量导入设备' },
-      `批量导入 ${importedDevices.length} 台设备`
-    );
+    DATA_STORE.transaction(() => {
+      writeJSON(DEVICES_FILE, devices.concat(importedDevices));
+      appendOperationLog(
+        'devices_batch_imported',
+        { id: 'batch', name: '批量导入设备' },
+        `批量导入 ${importedDevices.length} 台设备`
+      );
+    });
     res.json({ success: true, data: { count: importedDevices.length, devices: importedDevices } });
   } catch (e) {
     res.status(500).json({ success: false, message: '批量导入失败: ' + e.message });
@@ -1200,13 +1343,15 @@ app.put('/api/devices/batch-operational-status', requireAdminPermission('devices
       device.operationalStatus = operationalStatus;
       device.offlineReason = operationalStatus === 'offline' ? offlineReason : '';
     });
-    writeJSON(DEVICES_FILE, devices);
     const isOffline = operationalStatus === 'offline';
-    appendOperationLog(
-      isOffline ? 'devices_batch_offlined' : 'devices_batch_onlined',
-      { id: 'batch', name: isOffline ? '批量下线设备' : '批量上线设备' },
-      `批量${isOffline ? '下线' : '上线'} ${selectedDevices.length} 台设备${isOffline && offlineReason ? `；原因：${offlineReason}` : ''}`
-    );
+    DATA_STORE.transaction(() => {
+      writeJSON(DEVICES_FILE, devices);
+      appendOperationLog(
+        isOffline ? 'devices_batch_offlined' : 'devices_batch_onlined',
+        { id: 'batch', name: isOffline ? '批量下线设备' : '批量上线设备' },
+        `批量${isOffline ? '下线' : '上线'} ${selectedDevices.length} 台设备${isOffline && offlineReason ? `；原因：${offlineReason}` : ''}`
+      );
+    });
     res.json({ success: true, data: { count: selectedDevices.length, devices: selectedDevices.map(withDeviceCompatibility) } });
   } catch (e) {
     res.status(500).json({ success: false, message: '批量状态操作失败: ' + e.message });
@@ -1249,12 +1394,14 @@ app.put('/api/devices/batch-category', requireAdminPermission('devices'), (req, 
     selectedDevices.forEach(device => {
       device.category = targetCategory.id;
     });
-    writeJSON(DEVICES_FILE, devices);
-    appendOperationLog(
-      'devices_batch_categorized',
-      { id: 'batch', name: '批量分类设备' },
-      `批量分类 ${selectedDevices.length} 台设备至“${targetCategory.name}”`
-    );
+    DATA_STORE.transaction(() => {
+      writeJSON(DEVICES_FILE, devices);
+      appendOperationLog(
+        'devices_batch_categorized',
+        { id: 'batch', name: '批量分类设备' },
+        `批量分类 ${selectedDevices.length} 台设备至“${targetCategory.name}”`
+      );
+    });
     res.json({
       success: true,
       data: {
@@ -1315,8 +1462,10 @@ app.post('/api/devices', requireAdminPermission('devices'), upload.single('image
     };
 
     devices.push(device);
-    writeJSON(DEVICES_FILE, devices);
-    appendOperationLog('device_created', device, `新增设备：${device.name}（${device.model}）`);
+    DATA_STORE.transaction(() => {
+      writeJSON(DEVICES_FILE, devices);
+      appendOperationLog('device_created', device, `新增设备：${device.name}（${device.model}）`);
+    });
 
     res.json({ success: true, data: device });
   } catch (e) {
@@ -1434,8 +1583,10 @@ app.put('/api/devices/:id', requireAdminPermission('devices'), upload.single('im
 
     if (req.optimizedImage) Object.assign(devices[idx], req.optimizedImage);
 
-    writeJSON(DEVICES_FILE, devices);
-    appendOperationLog('device_updated', devices[idx], `编辑设备：${devices[idx].name}（${devices[idx].model}）`);
+    DATA_STORE.transaction(() => {
+      writeJSON(DEVICES_FILE, devices);
+      appendOperationLog('device_updated', devices[idx], `编辑设备：${devices[idx].name}（${devices[idx].model}）`);
+    });
     res.json({ success: true, data: withDeviceCompatibility(devices[idx]) });
   } catch (e) {
     res.json({ success: false, message: '更新失败: ' + e.message });
@@ -1461,11 +1612,13 @@ app.put('/api/devices/:id/operational-status', requireAdminPermission('devices')
     device.offlineReason = operationalStatus === 'offline'
       ? String(req.body?.offlineReason || '').trim()
       : '';
-    writeJSON(DEVICES_FILE, devices);
-    if (operationalStatus === 'offline') {
-      const reason = device.offlineReason ? `；原因：${device.offlineReason}` : '';
-      appendOperationLog('device_offlined', device, `下线设备：${device.name}${reason}`);
-    }
+    DATA_STORE.transaction(() => {
+      writeJSON(DEVICES_FILE, devices);
+      if (operationalStatus === 'offline') {
+        const reason = device.offlineReason ? `；原因：${device.offlineReason}` : '';
+        appendOperationLog('device_offlined', device, `下线设备：${device.name}${reason}`);
+      }
+    });
     res.json({ success: true, data: withDeviceCompatibility(device) });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -1495,10 +1648,12 @@ app.delete('/api/devices/:id', requireAdminPermission('devices'), (req, res) => 
     if (!device) return res.json({ success: false, message: '设备不存在' });
 
     devices = devices.filter(d => d.id !== req.params.id);
-    writeJSON(DEVICES_FILE, devices);
-    if (deleteRecords) {
-      writeJSON(RECORDS_FILE, records.filter(record => record.deviceId !== req.params.id));
-    }
+    DATA_STORE.transaction(() => {
+      writeJSON(DEVICES_FILE, devices);
+      if (deleteRecords) {
+        writeJSON(RECORDS_FILE, records.filter(record => record.deviceId !== req.params.id));
+      }
+    });
 
     // 删除 QR 码
     const qrPath = path.join(QR_DIR, `qr_${req.params.id}.png`);
@@ -1617,6 +1772,8 @@ app.post('/api/admin/email-settings/test', requireAdminPermission('email-setting
       returnNotes: '示例备注'
     };
     const values = buildEmailValues(eventType, sampleRecord, settings);
+    // 测试邮件与正式单台通知共用分组明细格式，避免模板预览和真实邮件出现差异。
+    values.recordList = formatEmailRecordGroup(eventType, [sampleRecord], settings);
     const template = resolveEventTemplate(settings, eventType);
     await sendSmtpMail({
       smtp: settings.smtp,
@@ -1657,9 +1814,6 @@ app.post('/api/records/borrow', borrowReturnLimiter, (req, res) => {
       return res.status(409).json({ success: false, message: '该设备已被借用，请先归还' });
     }
 
-    device.status = 'borrowed';
-    writeJSON(DEVICES_FILE, devices);
-
     const records = readJSON(RECORDS_FILE);
     const record = {
       id: 'REC' + Date.now().toString(36).toUpperCase(),
@@ -1677,13 +1831,62 @@ app.post('/api/records/borrow', borrowReturnLimiter, (req, res) => {
       notes: purpose,
       createdAt: new Date().toISOString()
     };
+    device.status = 'borrowed';
+    records.push(record);
+    DATA_STORE.transaction(() => {
+      writeJSON(DEVICES_FILE, devices);
+      writeJSON(RECORDS_FILE, records);
+    });
+
+    queueEmailNotification('borrow', record);
+    res.json({ success: true, message: '借用成功', data: record });
+  } catch (e) {
+    res.json({ success: false, message: e.message });
+  }
+});
+
+// 借用尚未录入库存的设备：只写入普通借用记录，不改变设备库存。
+app.post('/api/records/borrow-other', borrowReturnLimiter, (req, res) => {
+  try {
+    const otherDeviceName = String(req.body?.otherDeviceName || '').trim();
+    const borrowerName = String(req.body?.borrowerName || '').trim();
+    const borrowerId = String(req.body?.borrowerId || '').trim();
+    const borrowerPhone = normalizePhone(req.body?.borrowerPhone);
+    const major = String(req.body?.major ?? req.body?.department ?? '').trim();
+    const purpose = String(req.body?.purpose ?? req.body?.notes ?? '').trim();
+    if (!otherDeviceName || !borrowerName || !borrowerPhone || !major || !purpose) {
+      return res.status(400).json({ success: false, message: '设备名称、姓名、完整手机号、专业和用途均为必填项' });
+    }
+    if (!isFullPhone(borrowerPhone)) {
+      return res.status(400).json({ success: false, message: '请输入 11 位完整手机号' });
+    }
+
+    const records = readJSON(RECORDS_FILE);
+    const record = {
+      id: 'REC' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase(),
+      deviceId: null,
+      deviceName: otherDeviceName,
+      deviceModel: '',
+      isOtherDevice: true,
+      otherDeviceName,
+      type: 'borrow',
+      borrowerName,
+      borrowerId,
+      borrowerPhone,
+      major,
+      purpose,
+      // 保留旧字段，便于旧部署脚本和历史前端平滑读取。
+      department: major,
+      notes: purpose,
+      createdAt: new Date().toISOString()
+    };
     records.push(record);
     writeJSON(RECORDS_FILE, records);
 
     queueEmailNotification('borrow', record);
     res.json({ success: true, message: '借用成功', data: record });
   } catch (e) {
-    res.json({ success: false, message: e.message });
+    res.status(500).json({ success: false, message: e.message });
   }
 });
 
@@ -1756,8 +1959,10 @@ app.post('/api/records/borrow-batch', borrowReturnLimiter, (req, res) => {
       borrowed.push({ deviceId, deviceName: device.name, recordId: record.id });
     }
 
-    writeJSON(DEVICES_FILE, devices);
-    writeJSON(RECORDS_FILE, records);
+    DATA_STORE.transaction(() => {
+      writeJSON(DEVICES_FILE, devices);
+      writeJSON(RECORDS_FILE, records);
+    });
 
     // 批量借出只发一封汇总邮件，不再逐台发送。
     queueBatchEmailNotification('borrow', createdRecords);
@@ -1795,6 +2000,16 @@ app.post('/api/records/return-lookup', borrowReturnLimiter, (req, res) => {
     const publicRecords = matchedRecords
       .map(record => {
         const device = devices.find(item => item.id === record.deviceId);
+        if (record.isOtherDevice === true) {
+          return {
+            recordId: record.id,
+            deviceId: null,
+            deviceName: record.deviceName,
+            deviceModel: record.deviceModel || '',
+            isOtherDevice: true,
+            borrowedAt: record.createdAt
+          };
+        }
         if (!device || device.status !== 'borrowed') return null;
         return {
           recordId: record.id,
@@ -1837,17 +2052,20 @@ app.post('/api/records/return', borrowReturnLimiter, (req, res) => {
 
     const devices = readJSON(DEVICES_FILE);
     const device = devices.find(item => item.id === activeRecord.deviceId);
-    if (!device) return res.status(404).json({ success: false, message: '设备不存在' });
-    if (device.status === 'available') {
+    if (activeRecord.isOtherDevice !== true && !device) {
+      return res.status(404).json({ success: false, message: '设备不存在' });
+    }
+    if (activeRecord.isOtherDevice !== true && device.status === 'available') {
       return res.status(409).json({ success: false, message: '该设备当前未借出' });
     }
 
-    device.status = 'available';
-    writeJSON(DEVICES_FILE, devices);
-
     activeRecord.returnedAt = new Date().toISOString();
     activeRecord.returnNotes = String(req.body?.notes || '').trim();
-    writeJSON(RECORDS_FILE, records);
+    if (device) device.status = 'available';
+    DATA_STORE.transaction(() => {
+      if (device) writeJSON(DEVICES_FILE, devices);
+      writeJSON(RECORDS_FILE, records);
+    });
 
     authorization.recordIds = authorization.recordIds.filter(id => id !== recordId);
     if (!authorization.recordIds.length) returnAuthorizations.delete(returnToken);
@@ -1896,25 +2114,27 @@ app.post('/api/records/return-batch', borrowReturnLimiter, (req, res) => {
         continue;
       }
       const device = devices.find(item => item.id === record.deviceId);
-      if (!device) {
+      if (record.isOtherDevice !== true && !device) {
         conflicts.push({ recordId, reason: '设备不存在' });
         continue;
       }
-      if (device.status === 'available') {
+      if (record.isOtherDevice !== true && device.status === 'available') {
         conflicts.push({ recordId, reason: '该设备当前未借出' });
         continue;
       }
 
       record.returnedAt = now;
       record.returnNotes = notes;
-      device.status = 'available';
-      returned.push({ recordId, deviceId: device.id, deviceName: device.name });
+      if (device) device.status = 'available';
+      returned.push({ recordId, deviceId: record.deviceId, deviceName: record.deviceName });
       returnedRecords.push(record);
       authorization.recordIds = authorization.recordIds.filter(id => id !== recordId);
     }
 
-    writeJSON(DEVICES_FILE, devices);
-    writeJSON(RECORDS_FILE, records);
+    DATA_STORE.transaction(() => {
+      if (returned.some(item => item.deviceId)) writeJSON(DEVICES_FILE, devices);
+      writeJSON(RECORDS_FILE, records);
+    });
     if (!authorization.recordIds.length) returnAuthorizations.delete(returnToken);
 
     // 批量归还只发一封汇总邮件，不再逐台发送。
@@ -2007,16 +2227,26 @@ app.post('/api/records/:id/force-return', requireAdminPermission('records'), (re
 
     const devices = readJSON(DEVICES_FILE);
     const device = devices.find(item => item.id === record.deviceId);
-    if (!device) return res.status(404).json({ success: false, message: '设备不存在' });
+    if (record.isOtherDevice !== true && !device) {
+      return res.status(404).json({ success: false, message: '设备不存在' });
+    }
 
     record.returnedAt = new Date().toISOString();
     record.returnNotes = String(req.body?.notes || '管理员确认归还').trim();
-    device.status = 'available';
-    writeJSON(DEVICES_FILE, devices);
-    writeJSON(RECORDS_FILE, records);
-    appendOperationLog('admin_returned', device, `管理员归还设备：${device.name}（${device.model}）`);
+    // 其他设备没有库存对象，日志使用记录快照构造虚拟目标。
+    const logDevice = device || {
+      id: record.deviceId || `other:${record.id}`,
+      name: record.deviceName,
+      model: record.deviceModel || ''
+    };
+    if (device) device.status = 'available';
+    DATA_STORE.transaction(() => {
+      if (device) writeJSON(DEVICES_FILE, devices);
+      writeJSON(RECORDS_FILE, records);
+      appendOperationLog('admin_returned', logDevice, `管理员归还设备：${logDevice.name}（${logDevice.model}）`);
+    });
     queueEmailNotification('adminReturn', record);
-    res.json({ success: true, data: record, message: '设备已由管理员归还' });
+    res.json({ success: true, data: withRecordCompatibility(record), message: '设备已由管理员归还' });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
   }
@@ -2054,29 +2284,30 @@ app.post('/api/records/force-return-batch', requireAdminPermission('records'), (
         continue;
       }
       const device = devices.find(item => item.id === record.deviceId);
-      if (!device) {
+      if (record.isOtherDevice !== true && !device) {
         conflicts.push({ recordId, deviceName: record.deviceName, reason: '设备不存在' });
         continue;
       }
 
       record.returnedAt = now;
       record.returnNotes = notes;
-      device.status = 'available';
-      returned.push({ recordId, deviceId: device.id, deviceName: device.name });
+      if (device) device.status = 'available';
+      returned.push({ recordId, deviceId: record.deviceId, deviceName: record.deviceName, isOtherDevice: record.isOtherDevice === true });
       returnedRecords.push(record);
     }
 
-    writeJSON(DEVICES_FILE, devices);
-    writeJSON(RECORDS_FILE, records);
-
     // 批量归还只写一条汇总日志（对齐批量上下线），日志不含借用人隐私。
-    if (returned.length) {
-      appendOperationLog(
-        'admin_returned',
-        { id: 'batch', name: '批量归还设备' },
-        `批量管理员归还 ${returned.length} 台设备${notes && notes !== '管理员确认归还' ? `；备注：${notes}` : ''}`
-      );
-    }
+    DATA_STORE.transaction(() => {
+      if (returned.some(item => item.deviceId)) writeJSON(DEVICES_FILE, devices);
+      writeJSON(RECORDS_FILE, records);
+      if (returned.length) {
+        appendOperationLog(
+          'admin_returned',
+          { id: 'batch', name: '批量归还设备' },
+          `批量管理员归还 ${returned.length} 台设备${notes && notes !== '管理员确认归还' ? `；备注：${notes}` : ''}`
+        );
+      }
+    });
     // 批量归还只发一封汇总邮件，不再逐台发送。
     queueBatchEmailNotification('adminReturn', returnedRecords);
 
@@ -2263,6 +2494,11 @@ app.put('/api/admin/password', checkAdmin, (req, res) => {
 // ==================== 前端页面 ====================
 // 借还页面（用户扫码进入）
 app.get('/borrow', (req, res) => {
+  res.sendFile(path.join(STATIC_DIR, 'index.html'));
+});
+
+// 归还后的答案之书彩蛋复用同一前端入口，不创建新的服务端数据接口。
+app.get('/answers', (req, res) => {
   res.sendFile(path.join(STATIC_DIR, 'index.html'));
 });
 

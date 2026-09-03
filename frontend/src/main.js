@@ -43,6 +43,8 @@ const EMAIL_TEMPLATE_FIELDS = [
   { key: 'deviceName', label: '设备名称' },
   { key: 'deviceModel', label: '设备型号' },
   { key: 'deviceId', label: '设备编号' },
+  { key: 'deviceNotice', label: '待上线提醒' },
+  { key: 'recordList', label: '借用明细' },
   { key: 'borrowerName', label: '借用人' },
   { key: 'borrowerId', label: '学号/工号' },
   { key: 'borrowerPhone', label: '联系电话' },
@@ -332,6 +334,15 @@ const BorrowPage = {
                 </div>
               </div>
             </div>
+            <!-- 其他设备入口：库存未录入时也直接创建普通借用记录。 -->
+            <section v-if="!selectedDeviceId" class="portal-other-device-entry" aria-labelledby="other-device-entry-title">
+              <div>
+                <p class="portal-other-device-entry__eyebrow">没找到要借的设备？</p>
+                <h2 id="other-device-entry-title">借用其他设备</h2>
+                <p>管理员还没来得及录入的设备，也可以先填写名称借用。</p>
+              </div>
+              <button class="btn btn--ghost btn--sm" type="button" @click="showOtherBorrowForm = true">填写设备名称</button>
+            </section>
         </section>
 
         <section v-else class="portal-section">
@@ -413,6 +424,7 @@ const BorrowPage = {
             <strong>{{ actionFeedback.title }}</strong>
             <small v-if="actionFeedback.detail">{{ actionFeedback.detail }}</small>
           </span>
+          <a v-if="actionFeedback.action" class="portal-feedback__action" :href="actionFeedback.action.href">{{ actionFeedback.action.label }}</a>
           <button class="portal-feedback__close" type="button" aria-label="关闭提示" @click="clearActionFeedback">×</button>
         </div>
       </transition>
@@ -487,6 +499,46 @@ const BorrowPage = {
           <div class="modal-footer">
             <button class="btn btn--ghost btn--lg" @click="showBatchBorrowForm = false">取消</button>
             <button class="btn btn--primary btn--lg" :disabled="submitting" @click="doBatchBorrow">{{ submitting ? '提交中…' : '确认借用' }}</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 其他设备借用弹窗：沿用普通借用信息，并把设备名称一并写入 records.json。 -->
+      <div v-if="showOtherBorrowForm" class="modal-overlay" @click.self="showOtherBorrowForm = false">
+        <div class="modal">
+          <div class="modal-header">
+            <div><h2>借用其他设备</h2><p class="modal-tip">请填写设备名称和真实借用信息，管理员会看到这条普通借用记录。</p></div>
+            <button class="modal-close" type="button" aria-label="关闭" @click="showOtherBorrowForm = false">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label>设备名称 <span class="required">*</span></label>
+              <input v-model.trim="form.otherDeviceName" class="input" maxlength="100" placeholder="如：无线领夹麦克风" />
+            </div>
+            <div class="form-group">
+              <label>姓名 <span class="required">*</span></label>
+              <input v-model.trim="form.borrowerName" class="input" autocomplete="name" placeholder="请输入你的姓名" />
+            </div>
+            <div class="form-group">
+              <label>学号 / 工号</label>
+              <input v-model.trim="form.borrowerId" class="input" placeholder="选填" />
+            </div>
+            <div class="form-group">
+              <label>完整手机号 <span class="required">*</span></label>
+              <input v-model.trim="form.borrowerPhone" class="input" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel" placeholder="请输入 11 位手机号" />
+            </div>
+            <div class="form-group">
+              <label>专业 <span class="required">*</span></label>
+              <input v-model.trim="form.major" class="input" placeholder="如：网络空间安全" />
+            </div>
+            <div class="form-group">
+              <label>用途 <span class="required">*</span></label>
+              <textarea v-model.trim="form.purpose" class="input textarea" rows="3" placeholder="请说明本次借用用途"></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn--ghost btn--lg" type="button" @click="showOtherBorrowForm = false">取消</button>
+            <button class="btn btn--primary btn--lg" type="button" :disabled="submitting" @click="doOtherBorrow">{{ submitting ? '提交中…' : '确认借用' }}</button>
           </div>
         </div>
       </div>
@@ -588,6 +640,7 @@ const BorrowPage = {
     const detailLoading = Vue.ref(false);
     const noDevice = Vue.ref(false);
     const showBorrowForm = Vue.ref(false);
+    const showOtherBorrowForm = Vue.ref(false);
     const submitting = Vue.ref(false);
     const returningRecordId = Vue.ref('');
     const returnSearched = Vue.ref(false);
@@ -602,7 +655,7 @@ const BorrowPage = {
     const loadedImages = Vue.reactive(new Set());
     const imageRatios = Vue.reactive({});
     const form = Vue.reactive({
-      borrowerName: '', borrowerId: '', borrowerPhone: '', major: '', purpose: ''
+      otherDeviceName: '', borrowerName: '', borrowerId: '', borrowerPhone: '', major: '', purpose: ''
     });
     const returnLookup = Vue.reactive({ borrowerName: '', borrowerPhone: '' });
     // 批量借用清单：最多 10 台，借用信息只需填写一次。
@@ -621,9 +674,9 @@ const BorrowPage = {
       actionFeedback.value = null;
     }
 
-    function showActionFeedback(title, detail = '', type = 'success') {
+    function showActionFeedback(title, detail = '', type = 'success', action = null) {
       clearActionFeedback();
-      actionFeedback.value = { title, detail, type };
+      actionFeedback.value = { title, detail, type, action };
       feedbackTimerId = window.setTimeout(clearActionFeedback, 4200);
     }
 
@@ -822,11 +875,13 @@ const BorrowPage = {
       }
       activeMode.value = mode;
       showBorrowForm.value = false;
+      showOtherBorrowForm.value = false;
       if (leavesDetailImmediately) finishCloseDevice();
       if (mode === 'borrow' && !selectedDeviceId.value) loadAvailableDevices();
     }
 
     function resetBorrowForm() {
+      form.otherDeviceName = '';
       form.borrowerName = '';
       form.borrowerId = '';
       form.borrowerPhone = '';
@@ -895,6 +950,29 @@ const BorrowPage = {
       }
     }
 
+    // 其他设备仍走普通借还记录，只跳过库存设备状态更新。
+    async function doOtherBorrow() {
+      if (!form.otherDeviceName || !form.borrowerName || !/^1\d{10}$/.test(form.borrowerPhone) || !form.major || !form.purpose) {
+        alert('请完整填写设备名称、姓名、11 位手机号、专业和用途');
+        return;
+      }
+      submitting.value = true;
+      try {
+        const res = await apiCall('POST', '/api/records/borrow-other', { ...form });
+        if (res.success) {
+          showOtherBorrowForm.value = false;
+          resetBorrowForm();
+          showActionFeedback('设备借用成功', '借用记录已保存；管理员会尽快上线这台设备。');
+        } else {
+          showActionFeedback('借用暂未完成', res.message || '请稍后重试', 'error');
+        }
+      } catch (e) {
+        showActionFeedback('借用暂未完成', '网络错误，请重试。', 'error');
+      } finally {
+        submitting.value = false;
+      }
+    }
+
     async function lookupReturns() {
       if (!returnLookup.borrowerName || !/^1\d{10}$/.test(returnLookup.borrowerPhone)) {
         alert('请输入借用时填写的姓名和 11 位完整手机号');
@@ -939,7 +1017,7 @@ const BorrowPage = {
           delete returnSelected[record.recordId];
           returnSearched.value = true;
           await loadAvailableDevices();
-          showActionFeedback('设备已归舱', '谢谢配合。');
+          showActionFeedback('设备已归舱', '谢谢配合。', 'success', { label: '打开答案之书', href: '/answers' });
         } else {
           showActionFeedback('归还暂未完成', res.message || '请稍后重试', 'error');
         }
@@ -977,7 +1055,8 @@ const BorrowPage = {
           showActionFeedback(
             returnedCount + ' 台设备已归舱',
             conflictNames.length ? '暂时无法归还：' + conflictNames.join('、') : '归还记录已更新。',
-            conflictNames.length ? 'warning' : 'success'
+            conflictNames.length ? 'warning' : 'success',
+            conflictNames.length ? null : { label: '打开答案之书', href: '/answers' }
           );
         } else {
           showActionFeedback('批量归还暂未完成', conflictNames.length ? '无法归还：' + conflictNames.join('、') : (res.message || '请稍后重试'), 'error');
@@ -1045,16 +1124,188 @@ const BorrowPage = {
 
     return {
       activeMode, availableDevices, filteredDevices, deviceColumns, searchQuery, activeCategory, categories, loadingDevices, selectedDeviceId, device, currentBorrower,
-      detailLoading, noDevice, showBorrowForm, submitting, returningRecordId, returnSearched,
+       detailLoading, noDevice, showBorrowForm, showOtherBorrowForm, submitting, returningRecordId, returnSearched,
       returnResults, returnToken, returnNotes, form, returnLookup, hasImage, markImageFailed,
       markImageLoaded, isImageLoaded, imageAspectRatio, imageDisplayAspectRatio, imageDisplayPositionY, buildSrcset, detailImageHeight, detailImageAspectRatio, detailMediaStyle,
-      deviceStatusText, deviceStatusClass, isMobileDetailLayout, openDevice, closeDevice, finishCloseDevice, switchMode, doBorrow,
+       deviceStatusText, deviceStatusClass, isMobileDetailLayout, openDevice, closeDevice, finishCloseDevice, switchMode, doBorrow, doOtherBorrow,
       lookupReturns, doReturn, formatDate, categoryIcon, categoryColorClass, siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping,
       MAX_BATCH_BORROW, borrowCart, showBorrowCart, showBatchBorrowForm, isInCart, toggleCartDevice, clearBorrowCart, openBatchBorrowForm, doBatchBorrow,
       returnSelected, batchReturnNotes, returnSelectedCount, toggleReturnSelect, toggleSelectAllReturns, doBatchReturn,
       actionFeedback, clearActionFeedback
     };
   }
+};
+
+// 答案之书页复刻参考站点的三态交互，答案和分享文案始终只在浏览器本地处理。
+const ANSWER_BOOK_RESPONSES = [
+  '要更加努力',
+  '不要害怕求助',
+  '保持冷静',
+  '现在就行动',
+  '你已经准备好了',
+  '相信你的直觉',
+  '情况看起来很好',
+  '现在说什么都太早了',
+  '需要更多的耐心',
+  '考虑不同的观点',
+  '不要忽视你的感受',
+  '你离成功不远',
+  '不要过度分析',
+  '保持开放的心态',
+  '这可能是你一直在等待的机会',
+  '时间会告诉一切'
+];
+
+const AnswersPage = {
+  setup() {
+    const answer = Vue.ref('');
+    const answerIndex = Vue.ref(-1);
+    const isLoading = Vue.ref(false);
+    const shareToastVisible = Vue.ref(false);
+    let answerTimerId = null;
+    let shareToastTimerId = null;
+    const originalTitle = document.title;
+    const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false;
+
+    // 用短暂翻书态还原参考站点的等待节奏，并避免连续两次抽到同一句。
+    function drawAnswer() {
+      if (isLoading.value) {
+        return;
+      }
+      isLoading.value = true;
+      answer.value = '';
+      let nextIndex = Math.floor(Math.random() * ANSWER_BOOK_RESPONSES.length);
+      while (ANSWER_BOOK_RESPONSES.length > 1 && nextIndex === answerIndex.value) {
+        nextIndex = Math.floor(Math.random() * ANSWER_BOOK_RESPONSES.length);
+      }
+      answerTimerId = window.setTimeout(() => {
+        answerIndex.value = nextIndex;
+        answer.value = ANSWER_BOOK_RESPONSES[nextIndex];
+        isLoading.value = false;
+        answerTimerId = null;
+      }, 850);
+    }
+
+    function showShareToast() {
+      shareToastVisible.value = true;
+      if (shareToastTimerId) {
+        window.clearTimeout(shareToastTimerId);
+      }
+      shareToastTimerId = window.setTimeout(() => {
+        shareToastVisible.value = false;
+        shareToastTimerId = null;
+      }, 2000);
+    }
+
+    function copyWithTextarea(text) {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.cssText = 'position:fixed;top:1px;left:1px;width:1px;height:1px;padding:0;border:0;opacity:0;z-index:9999;';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      let copied = false;
+      try {
+        copied = document.execCommand('copy');
+      } catch (error) {
+        copied = false;
+      }
+      document.body.removeChild(textarea);
+      return copied;
+    }
+
+    async function copyAnswer() {
+      const shareText = '我刚抽到答案之书：\n「' + answer.value + '」\n\n你也来抽一次\n' + window.location.origin + '/answers';
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+      if (isMobile && navigator.share) {
+        try {
+          await navigator.share({ text: shareText });
+          return;
+        } catch (error) {
+          if (error && error.name === 'AbortError') {
+            return;
+          }
+        }
+      }
+
+      if (!copyWithTextarea(shareText) && navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(shareText);
+        } catch (error) {
+          // 旧浏览器可能禁用剪贴板，但仍给出与参考站点一致的反馈。
+        }
+      }
+      showShareToast();
+    }
+
+    Vue.onMounted(() => {
+      // 答案页覆盖根滚动条槽位的背景，避免右侧露出借还页米白底色。
+      document.documentElement.classList.add('answers-route');
+      document.body.classList.add('answers-route');
+      document.title = '答案之书在线免费测试 - 在犹豫不决时，找到内心的答案';
+      if (!customElements.get('dotlottie-player')) {
+        const playerScript = document.createElement('script');
+        playerScript.type = 'module';
+        playerScript.src = '/assets/dotlottie-player.mjs';
+        document.head.appendChild(playerScript);
+      }
+    });
+
+    Vue.onBeforeUnmount(() => {
+      if (answerTimerId) {
+        window.clearTimeout(answerTimerId);
+      }
+      if (shareToastTimerId) {
+        window.clearTimeout(shareToastTimerId);
+      }
+      document.documentElement.classList.remove('answers-route');
+      document.body.classList.remove('answers-route');
+      document.title = originalTitle;
+    });
+
+    return { answer, isLoading, prefersReducedMotion, shareToastVisible, drawAnswer, copyAnswer };
+  },
+  template: `
+    <div class="answers-page">
+      <div class="answers-site-title">
+        <a href="/borrow" aria-label="返回设备借还">
+          <img src="/assets/answer-book-icon.png" alt="答案之书图标" width="36" height="36" />
+          <!-- 站点标题使用简洁的答案之书品牌文案。 -->
+          <span>答案之书</span>
+        </a>
+      </div>
+      <!-- 右上角提供明确的返回入口，方便彩蛋结束后回到借还页面。 -->
+      <a href="/borrow" class="answers-back-link">返回借还</a>
+
+      <main class="answers-stage">
+        <section v-if="isLoading" class="answers-loading" role="status" aria-live="polite">
+          <dotlottie-player class="answers-loading__animation" src="/assets/answer-book-loading.json" background="transparent" :speed="prefersReducedMotion ? 0 : 1" loop autoplay></dotlottie-player>
+          <p>正在翻书...</p>
+        </section>
+
+        <section v-else-if="!answer" class="answers-home">
+          <h1>在犹豫不决时，找到内心的答案</h1>
+          <div class="answers-home__main">
+            <img class="answers-book-image" src="/assets/answer-book.png" alt="答案之书在线免费测试" width="300" height="410" decoding="async" fetchpriority="high" @click="drawAnswer" />
+            <p>在心中思考一个问题，点击答案之书探索可能的答案</p>
+          </div>
+        </section>
+
+        <section v-else class="answers-result" aria-live="polite">
+          <p class="answers-result__quote">“<span>{{ answer }}</span>”</p>
+          <div class="answers-result__actions">
+            <button type="button" class="answers-share-button" @click="copyAnswer">发给朋友</button>
+            <!-- 再抽一次回到答案之书主页，重新开始彩蛋。 -->
+            <a href="/answers" class="answers-retry-button">再抽一次</a>
+          </div>
+        </section>
+
+        <p v-if="shareToastVisible" class="answers-share-toast" role="status" aria-live="polite">文案已复制，快发给朋友咯</p>
+      </main>
+    </div>
+  `
 };
 
 // ==================== 管理后台组件 ====================
@@ -1498,6 +1749,7 @@ const AdminPage = {
                   <div>
                     <div class="record-device-name">{{ rec.deviceName }}</div>
                     <div class="record-device-model">{{ rec.deviceModel }}</div>
+                    <div v-if="rec.isOtherDevice" class="record-device-flags"><span class="record-device-flag">待上线设备</span></div>
                   </div>
                 </div>
                 <span class="tag tag--danger">借出中</span>
@@ -1544,6 +1796,7 @@ const AdminPage = {
                   <div>
                     <div class="record-device-name">{{ rec.deviceName }}</div>
                     <div class="record-device-model">{{ rec.deviceModel }}</div>
+                    <div v-if="rec.isOtherDevice" class="record-device-flags"><span class="record-device-flag">待上线设备</span></div>
                   </div>
                 </div>
                 <span class="tag" :class="rec.returnedAt ? 'tag--success' : 'tag--danger'">
@@ -1589,6 +1842,7 @@ const AdminPage = {
                   <div>
                     <div class="record-device-name">{{ rec.deviceName }}</div>
                     <div class="record-device-model">{{ rec.deviceModel }}</div>
+                    <div v-if="rec.isOtherDevice" class="record-device-flags"><span class="record-device-flag">待上线设备</span></div>
                   </div>
                 </div>
                 <span class="tag">已归档</span>
@@ -2038,31 +2292,25 @@ const AdminPage = {
         notifyAdminReturn: false,
         recipientsText: '',
         smtp: { host: '', port: 465, security: 'ssl', username: '', secret: '', secretConfigured: false },
-        // 三类事件各自独立的主题和正文；事件名写死，其余字段继续使用变量。
+        // 三类事件各自独立的完整正文；事件名写死，其余字段继续使用变量。
         templates: {
           borrow: {
             subject: '【设备管理】设备借出：{{deviceName}}',
             body: [
-              '设备借出通知', '', '事件：设备借出', '设备名称：{{deviceName}}', '设备型号：{{deviceModel}}',
-              '设备编号：{{deviceId}}', '借用人：{{borrowerName}}', '联系电话：{{borrowerPhoneMasked}}',
-              '专业/部门：{{major}}', '借用用途：{{purpose}}', '借用时间：{{borrowedAt}}', '操作时间：{{eventAt}}'
+              '设备借出通知', '', '事件：设备借出', '{{deviceNotice}}', '', '借用明细：', '{{recordList}}', '', '操作时间：{{eventAt}}'
             ].join('\n')
           },
           return: {
             subject: '【设备管理】用户归还：{{deviceName}}',
             body: [
-              '用户归还通知', '', '事件：用户归还', '设备名称：{{deviceName}}', '设备型号：{{deviceModel}}',
-              '设备编号：{{deviceId}}', '借用人：{{borrowerName}}', '联系电话：{{borrowerPhoneMasked}}',
-              '专业/部门：{{major}}', '借用用途：{{purpose}}', '借用时间：{{borrowedAt}}',
+              '用户归还通知', '', '事件：用户归还', '{{deviceNotice}}', '', '归还明细：', '{{recordList}}', '',
               '归还时间：{{eventAt}}', '归还备注：{{returnNotes}}'
             ].join('\n')
           },
           adminReturn: {
             subject: '【设备管理】管理员归还：{{deviceName}}',
             body: [
-              '管理员归还通知', '', '事件：管理员归还', '设备名称：{{deviceName}}', '设备型号：{{deviceModel}}',
-              '设备编号：{{deviceId}}', '借用人：{{borrowerName}}', '联系电话：{{borrowerPhoneMasked}}',
-              '专业/部门：{{major}}', '借用用途：{{purpose}}', '借用时间：{{borrowedAt}}',
+              '管理员归还通知', '', '事件：管理员归还', '{{deviceNotice}}', '', '归还明细：', '{{recordList}}', '',
               '归还时间：{{eventAt}}', '归还备注：{{returnNotes}}'
             ].join('\n')
           }
@@ -2111,6 +2359,11 @@ const AdminPage = {
           borrowerNameMasked: '示**户',
           borrowerIdMasked: '20******01',
           borrowerPhoneMasked: '138****',
+          deviceNotice: '',
+          recordList: [
+            '借用人：示**户', '联系电话：138****', '设备明细：',
+            '1. 示例设备（型号：DEMO-001，编号：DEMO-DEVICE）'
+          ].join('\n'),
           major: '示例部门',
           purpose: '模板预览',
           borrowedAt: '2026-08-14 10:00',
@@ -3437,12 +3690,14 @@ const AdminPage = {
 const path = window.location.pathname;
 const isBorrowPage = path === '/borrow' || path === '/borrow/';
 const isAdminPage = path === '/admin' || path === '/admin/';
+const isAnswersPage = path === '/answers' || path === '/answers/';
 
 // ==================== 创建应用 ====================
 const app = createApp({
   setup() {
     const isAdmin = Vue.ref(isAdminPage);
     const isBorrow = Vue.ref(isBorrowPage);
+    const isAnswers = Vue.ref(isAnswersPage);
 
     // 监听 popstate 处理浏览器前进后退
     Vue.onMounted(() => {
@@ -3450,15 +3705,17 @@ const app = createApp({
         const p = window.location.pathname;
         isBorrow.value = p === '/borrow' || p === '/borrow/';
         isAdmin.value = p === '/admin' || p === '/admin/';
+        isAnswers.value = p === '/answers' || p === '/answers/';
       });
     });
 
-    return { isAdmin, isBorrow };
+    return { isAdmin, isBorrow, isAnswers };
   },
 
   template: `
     <BorrowPage v-if="isBorrow" />
     <AdminPage v-else-if="isAdmin" />
+    <AnswersPage v-else-if="isAnswers" />
     <div v-else class="redirect-page">
       <div class="redirect-content">
         <picture><source srcset="/assets/jnu-cyber-security-emblem.webp" type="image/webp" /><img class="redirect-emblem" src="/assets/jnu-cyber-security-emblem.png" width="76" height="76" alt="暨南大学网络空间安全学院院徽" loading="eager" decoding="async" /></picture>
@@ -3469,7 +3726,7 @@ const app = createApp({
     </div>
   `,
 
-  components: { BorrowPage, AdminPage }
+  components: { BorrowPage, AdminPage, AnswersPage }
 });
 
 app.mount('#app');

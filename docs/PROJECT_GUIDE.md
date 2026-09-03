@@ -1,17 +1,17 @@
 # 学院设备管理系统项目导航
 
-> 最后更新：2026-08-30
+> 最后更新：2026-09-03
 > 本文是稳定规则和定位入口；当前任务与验证状态只看 [`CURRENT_STATUS.md`](CURRENT_STATUS.md)，历史记录见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 1. 项目概览
 
-学院内部设备借还系统，提供普通用户借还门户和管理员后台。生产入口为 `https://cyb3r.art/borrow` 与 `https://cyb3r.art/admin`，根路径重定向到 `/borrow`。系统使用 Node.js/Express、Vue 3/Vite 和 JSON 文件持久化，前置 Nginx，适合当前小规模内部使用。
+学院内部设备借还系统，提供普通用户借还门户和管理员后台。生产入口为 `https://cyb3r.art/borrow` 与 `https://cyb3r.art/admin`，根路径重定向到 `/borrow`。系统使用 Node.js/Express、Vue 3/Vite，业务数据已由 SQLite 持久化，旧 JSON 文件仅用于首次启动迁移和人工回滚备份；前置 Nginx，适合当前小规模内部使用。
 
 ## 2. 产品红线
 
 ### 入口与二维码
 
-- 普通用户使用 `/borrow`；管理员使用 `/admin`；微信小程序目录 `miniprogram/` 暂缓，不纳入网页端迭代。
+- 普通用户使用 `/borrow`；归还成功通知可进入普通用户答案彩蛋页 `/answers`；管理员使用 `/admin`；微信小程序目录 `miniprogram/` 暂缓，不纳入网页端迭代。
 - 统一二维码指向 `/borrow`；设备二维码使用 `/borrow?id=<deviceId>`；两套二维码长期并存。公开设备列表使用响应式独立列式瀑布流，手机 2 列、平板 3 列、桌面 4 列，设备按顺序分列。
 - 用户端、管理端和页脚使用暨南大学网络空间安全学院品牌；用户端顶部品牌栏和“借设备 / 还设备”分段控件使用宽版容器，两个选项自动均分；归还查询内容保持可读限宽。用户端和管理端底栏显示运行时长、一次性诗词/哲学一言及服务备案号，备案号链接至工信部备案官网。
 - 用户端 `/borrow` 支持鼠标和触摸点击粒子特效；特效 Canvas 不拦截页面操作，按钮、表单控件、链接和弹窗点击不触发；管理端 `/admin` 不创建 Canvas、不加载特效脚本。
@@ -20,10 +20,19 @@
 
 - 公共列表只展示 `online + available` 设备；借用时必填姓名、11 位手机号、专业和用途，学号/工号可选。
 - 支持批量借用：用户可将多台设备加入借用清单（最多 10 台），共用一份借用信息一次提交；后端 `POST /api/records/borrow-batch` 逐个校验设备存在、在线且未借出，单台冲突不影响其他设备借出，部分成功返回成功与冲突列表，每台成功记录独立写入，批量只发一封汇总邮件。
+- 支持借用未录入库存的设备：用户填写设备名称后调用 `POST /api/records/borrow-other`，仍写入普通借用记录并进入管理员当前借出列表，不创建或修改库存设备；记录标记 `isOtherDevice`，后续可正常用户归还或管理员强制归还。
 - 支持批量归还：用户查询待归还设备后可勾选多台，统一备注一次归还（备注不同请各自单独归还），凭证覆盖所选记录；管理员可在当前借出列表勾选多台批量强制归还（`POST /api/records/return-batch` / `force-return-batch`），只写一条汇总操作日志。
 - 后端必须再次校验设备存在、在线且未借出，不能只依赖前端状态。
 - 用户凭姓名和完整手机号查询本人未归还记录；查询成功签发 10 分钟归还凭证；普通用户不应看到他人的完整信息。
 - 普通用户只看到脱敏姓名和手机号；管理员才可查看完整借用信息、强制归还、归档、恢复和永久删除已归还记录。
+- 单台归还或全部成功的批量归还完成后，用户端非阻塞通知栏显示“打开答案之书”；存在批量冲突时只显示归还结果，不展示彩蛋入口。
+
+### 答案之书彩蛋
+
+- `/answers` 是复用前端入口的普通用户页面，不需要登录，不新增 API，也不记录用户问题或答案；页面采用参考站点的白底居中三态布局和核心文案。
+- 初始态展示本地托管的 `answer-book.png` 与“在心中思考一个问题，点击答案之书探索可能的答案”，翻书态展示本地 loading 动画与“正在翻书...”，结果态展示随机答案、“发给朋友”和返回 `/answers` 首页的“再抽一次”；结果文字需在桌面端和移动端容器内自适应换行。
+- “发给朋友”在支持系统分享的移动端调用系统分享，否则复制分享文案并显示“文案已复制，快发给朋友咯”；点击站点标题返回 `/borrow`；页面适配桌面端和 390px 移动端，并遵守 `prefers-reduced-motion`。
+- 文案仅为娱乐性彩蛋，不应被解释为设备管理、健康或其他现实决策建议。
 
 ### 设备状态与分类
 
@@ -43,9 +52,10 @@
 
 - 管理员可配置 SMTP、收件人、借出/用户归还/管理员归还开关和模板；凭据使用 `EMAIL_CONFIG_KEY` 加密写入 `DATA_DIR/email-settings.json`，接口不回传原文。
 - 记录成功写入后异步发送；发送失败不回滚业务结果，当前没有持久化重试队列。
-- 三类事件（借出、用户归还、管理员归还）使用各自独立的主题和正文模板（`templates.{borrow|return|adminReturn}`）；默认模板事件名写死、其余字段使用变量。旧部署仅含 `subjectTemplate`/`bodyTemplate` 时三类事件整组回退到旧模板；保存后旧字段始终同步为借出模板，旧前端读取不受影响。
-- 批量事件（批量借出/批量归还/批量强制归还）只发一封汇总邮件：`{{deviceName}}`/`{{deviceModel}}`/`{{deviceId}}` 在批量事件下自动渲染为顿号分隔的完整清单，无需新增模板变量，旧模板直接兼容；单台事件保持逐台单邮件。
-- 模板支持事件、设备、借用人、时间和归还备注变量；显式 `*Masked` 变量始终脱敏。测试邮件使用模拟数据和当前草稿，不读取真实记录、不保存草稿；测试发送按所选事件使用对应模板。
+- 三类事件（借出、用户归还、管理员归还）使用各自独立的主题和正文模板（`templates.{borrow|return|adminReturn}`）；默认模板事件名写死、其余字段使用变量，管理端开箱即用显示完整的事件、明细、时间和备注结构。旧部署仅含 `subjectTemplate`/`bodyTemplate` 时三类事件整组回退到旧模板；识别到系统历史“标题 + `{{recordList}}`”简略正文时自动升级为完整模板；保存后旧字段始终同步为借出模板，旧前端读取不受影响。
+- 批量事件（批量借出/批量归还/批量强制归还）只发一封汇总邮件，并按借用人分组展示姓名、电话、专业/部门、用途和逐条设备明细；`{{deviceName}}`/`{{deviceModel}}`/`{{deviceId}}` 仍自动渲染为顿号分隔的完整清单，重复名称或型号不丢失，单台事件保持逐台单邮件。
+- 模板支持事件、设备、借用人、时间和归还备注变量，以及 `{{deviceNotice}}`（待上线提醒）和 `{{recordList}}`（按借用人分组的明细）。其他设备的名称保持干净，型号为空显示“暂未录入（待管理员上线后补充）”，编号缺失显示“待管理员上线后生成”；旧模板未使用新变量时，系统自动补充提醒/批量明细，多借用人不会再把第一人显示成整批唯一借用人。
+- 显式 `*Masked` 变量始终脱敏。测试邮件使用模拟数据和当前草稿，不读取真实记录、不保存草稿；测试发送按所选事件使用对应模板，并与正式单台通知共用明细格式。
 
 ## 3. 技术全景
 
@@ -55,39 +65,44 @@
         -> Express / Node.js :3000
            -> REST API
            -> Vue/Vite 静态资源
-           -> JSON 数据、上传图片、二维码
+           -> SQLite 数据库、上传图片、二维码
 ```
 
-主要依赖：Node.js、Express 4、Vue 3、Vite 8、Helmet、express-rate-limit、Multer、Sharp、qrcode、ExcelJS（仅工作簿功能按需加载）。当前 Vue 使用运行时模板，CSP 仍需 `unsafe-eval`。
+主要依赖：Node.js 22.5+、Express 4、Vue 3、Vite 8、Helmet、express-rate-limit、Multer、Sharp、qrcode、ExcelJS（仅工作簿功能按需加载）；运行时和迁移脚本均使用 Node 内置 `node:sqlite`，不额外引入原生编译依赖。当前 Vue 使用运行时模板，CSP 仍需 `unsafe-eval`。
 
 ## 4. 代码地图
 
 | 路径 | 职责 | 何时查看 |
 | --- | --- | --- |
-| `server.js` | Express API、权限、校验、数据读写、上传和二维码 | 后端接口、数据、隐私、安全 |
+| `server.js` | Express API、权限、校验、SQLite 数据读写、上传、二维码和页面入口 | 后端接口、数据、隐私、安全 |
+| `db/repository.js` | SQLite 初始化、JSON 首次迁移、对象字段转换和事务封装 | 数据源切换、事务、数据库故障 |
 | `email-service.js` | SMTP 连接、认证和纯文本投递 | 邮件协议或投递问题 |
-| `frontend/src/main.js` | Vue 用户门户、管理后台和交互状态 | 页面行为、表单、接口调用 |
-| `frontend/index.html` | HTML 入口和全局响应式样式 | 布局、视觉、移动端样式、用户端粒子层样式 |
+| `frontend/src/main.js` | Vue 用户门户、答案之书彩蛋、管理后台和交互状态 | 页面行为、表单、接口调用 |
+| `frontend/index.html` | HTML 入口、用户端/答案之书/管理端全局响应式样式 | 布局、视觉、移动端样式、用户端粒子层样式 |
 | `public/js/anime.min.js` | Anime.js 2.2.0 静态动画依赖 | 用户端点击粒子特效按需加载 |
 | `public/js/fireworks.js` | 用户端 Canvas 粒子和圆环动画 | `/borrow` 点击特效、交互过滤和卸载清理 |
 | `vite.config.js` | Vite 根目录、代理和构建输出 | 构建或开发代理 |
 | `scripts/migrate-image-variants.js` | 旧图片 WebP 变体迁移 | 迁移或图片兼容 |
 | `test/` | 后端、前端、邮件、安全和部署契约测试 | 行为改动后补测试 |
 | `miniprogram/` | 暂缓的微信小程序普通用户端 | 仅处理小程序事项时查看 |
-| `data/`、`uploads/`、`public/qrcodes/` | 本地开发持久化和资源 | 不提交真实数据；部署不得覆盖 |
+| `data/`、`uploads/`、`public/qrcodes/` | 本地开发持久化和资源；`data/device-management.sqlite` 为运行时业务数据库，旧 JSON 仅用于首次迁移或备份 | 不提交真实数据；部署不得覆盖数据库、JSON 备份、上传和二维码 |
 | `frontend/dist/` | Vite 生成产物 | 构建生成，不手工编辑 |
 
 详细文件锚点、调用链和数据写入关系见 [`CODE_STRUCTURE.md`](CODE_STRUCTURE.md)。
 
 ## 5. 数据与兼容
 
-生产持久化目录由环境变量指定，通常为 `/var/lib/device-management/data`、`/var/lib/device-management/uploads` 和 `/var/lib/device-management/qrcodes`。核心 JSON 文件包括：
+生产持久化目录由环境变量指定，通常为 `/var/lib/device-management/data`、`/var/lib/device-management/uploads` 和 `/var/lib/device-management/qrcodes`；SQLite 默认保存为 `${DATA_DIR}/device-management.sqlite`，也可通过 `DATABASE_PATH` 指定。当前业务以 SQLite 为唯一数据源，旧 JSON 文件只在数据库不存在时参与首次迁移，不再作为运行时回退源。
+
+首次迁移使用的旧 JSON 文件包括：
 
 - `devices.json`：设备、图片引用、分类、借用状态和运营状态。
 - `records.json`：借用人、设备快照、借出/归还时间、归还备注和归档时间。
 - `operation-logs.json`：成功管理动作及设备元数据，不含借用人隐私。
 - `email-settings.json`：SMTP、通知开关和模板；SMTP 密文不可提交仓库。
 - `admin-users.json`：管理员账号、scrypt 密码哈希、角色、权限和时间戳。
+
+SQLite 运行时：`db/schema.sql` 定义目标表结构，`db/repository.js` 在数据库不存在时调用同等迁移逻辑导入旧 JSON；数据库存在后，所有业务读写都经对象适配层进入 SQLite。关键跨表操作使用 `BEGIN IMMEDIATE` 事务，服务退出前关闭数据库句柄，并启用 WAL 和 busy timeout。独立脚本 `npm run migrate:sqlite -- --data-dir <JSON目录> --output <SQLite文件>` 仍可用于生成不覆盖已有文件的离线副本。
 
 兼容规则：旧设备缺少分类按 `cat-other`，缺少运营状态按 `online`，缺少图片变体或展示字段按旧图片/自然比例回退；旧记录 `department`/`notes` 分别兼容读取为 `major`/`purpose`；新写入暂时保留旧字段。详情字段和完整示例见 `CODE_STRUCTURE.md` 及源码测试，不在本入口重复大段 JSON。
 
