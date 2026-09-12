@@ -69,9 +69,13 @@ function startFakeSmtpServer() {
   });
 }
 
-async function waitForServer() {
-  const deadline = Date.now() + 8000;
+// 测试服务启动诊断：串行 CI 下等待服务就绪，并保留子进程退出信息。
+async function waitForServer(child, getOutput = () => '') {
+  const deadline = Date.now() + 20000;
   while (Date.now() < deadline) {
+    if (child?.exitCode !== null && child?.exitCode !== undefined) {
+      throw new Error(`测试服务提前退出（${child.exitCode}）：\n${getOutput()}`);
+    }
     try {
       const response = await fetch(`http://127.0.0.1:${PORT}/api/devices/available`);
       if (response.ok) return;
@@ -80,7 +84,7 @@ async function waitForServer() {
     }
     await new Promise(resolve => setTimeout(resolve, 100));
   }
-  throw new Error('测试服务启动超时');
+  throw new Error(`测试服务启动超时（20 秒）：\n${getOutput()}`);
 }
 
 async function stopServer(child) {
@@ -131,7 +135,7 @@ test('successful borrowing queues a masked administrator email notification', as
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
-  await waitForServer();
+  await waitForServer(child, () => output);
   const login = await request('/api/admin/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'test-secret' })
   });
@@ -244,7 +248,7 @@ async function startEmailTestServer(devices = [
   child.stdout.on('data', chunk => { output += chunk.toString(); });
   child.stderr.on('data', chunk => { output += chunk.toString(); });
 
-  await waitForServer();
+  await waitForServer(child, () => output);
   const login = await request('/api/admin/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'test-secret' })
   });

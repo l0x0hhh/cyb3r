@@ -12,5 +12,7 @@ test('CI validates CommonJS syntax and validates the ESM frontend through Vite',
   assert.match(workflow, /node --check server\.js/);
   assert.match(workflow, /node --check db\/repository\.js/);
   assert.doesNotMatch(workflow, /node --check frontend\/src\/main\.js/);
+  assert.match(workflow, /run: node --test --test-concurrency=1/);
+  assert.doesNotMatch(workflow, /npm test -- --test-concurrency/);
   assert.match(workflow, /run: npm run build/);
 });
