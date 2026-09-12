@@ -122,13 +122,13 @@ SQLite 运行时：`db/schema.sql` 定义目标表结构，`db/repository.js` �
 
 ### CI 自动验证
 
-- `.github/workflows/ci.yml` 在拉取请求和推送 `main` 时运行，使用 Node.js 22.5.0 执行 `npm ci --no-audit --no-fund`、服务端/数据库/前端语法检查、`npm test` 和 `npm run build`。
+- `.github/workflows/ci.yml` 在拉取请求和推送 `main` 时运行，使用 Node.js 22.5.0 执行 `npm ci --no-audit --no-fund`、服务端/数据库 CommonJS 语法检查、`npm test` 和 `npm run build`；前端 ESM 入口由 Vite 构建解析，不使用 `node --check`。
 - CI 只使用 GitHub Actions 临时运行器中的源码和测试数据，不读取生产持久化目录，不发送邮件，也不执行服务器部署。
 - 生产发布仍由管理员在授权服务器终端执行 `sudo bash /opt/device-management/deploy/update-from-git.sh`；是否增加手动点击发布或自动 CD，需另行评估权限、密钥和回滚方案。
 
 ```bash
 node --check server.js
-node --check frontend/src/main.js
+node --check db/repository.js
 npm test
 npm run build
 ```

@@ -1,4 +1,4 @@
-# CI：在拉取请求和 main 推送时执行语法检查、测试与前端构建。
+# CI：后端 CommonJS 用 node --check，前端 ESM 由 Vite 构建解析。
 name: CI
 
 on:
@@ -32,7 +32,6 @@ jobs:
         run: |
           node --check server.js
           node --check db/repository.js
-          node --check frontend/src/main.js
 
       - name: Run tests
         run: npm test
