@@ -6,7 +6,7 @@
 
 | 日期 | 版本 | 变化 | 验证 |
 | --- | --- | --- | --- |
-| 2026-09-12 | 2026.09.12-1 | 新增 GitHub Actions CI 工作流：PR 和 `main` 推送自动执行 Node.js 22.5.0 依赖安装、语法检查、完整测试和前端构建；暂不接入生产自动部署 | `git diff --check`、三项 `node --check`、`npm test` 194/194 和 `npm run build` 通过；GitHub Actions 云端运行待推送后确认，构建仅有既有 ExcelJS 大 chunk 提示 |
+| 2026-09-12 | 2026.09.12-1 | 新增 GitHub Actions CI 工作流：PR 和 `main` 推送自动执行 Node.js 22.5.0 依赖安装、语法检查、完整测试和前端构建；暂不接入生产自动部署，工作流已随 `250bf5f` 推送 `main` | `git diff --check`、三项 `node --check`、`npm test` 194/194 和 `npm run build` 通过；GitHub Actions 云端运行已触发、结果待确认，构建仅有既有 ExcelJS 大 chunk 提示 |
 | 2026-09-04 | 2026.09.04-1 | 完成 SQLite 运行时版本生产同步：服务器备份持久化目录和环境配置，拉取 `5e1e795`，首次从生产 JSON 导入 SQLite，完成依赖安装、前端构建、服务重启和健康检查 | 服务器 Node `22.23.1`；服务 `active`；SQLite `PRAGMA integrity_check` 为 `ok`；设备 14 台、记录 55 条；`/borrow` 与 `/admin` 均为 `200 OK`；浏览器和真实 SMTP 收件待用户手动验收 |
 | 2026-09-03 | 2026.09.03-7 | SQLite 第二阶段运行时切换：新增统一 SQLite repository，首次启动从旧 JSON 导入，数据库存在后不再读取或写回 JSON；关键借用、归还、批量、删除、分类和管理操作使用事务，启用 WAL 与 busy timeout，并在服务退出时关闭数据库 | SQLite 专项测试 3/3；邮件专项测试 11/11；服务端专项测试 60/60；完整测试 194/194；`node --check server.js`、`node --check db/repository.js` 和 `npm run build` 通过；尚未同步服务器或生产验证 |
 | 2026-09-03 | 2026.09.03-6 | SQLite 第一阶段迁移准备：新增目标 schema 和 JSON → SQLite 一次性迁移脚本，导入设备、记录、分类、操作日志、管理员和邮件配置，使用事务/WAL 并默认拒绝覆盖；业务仍使用 JSON，未切换线上读写 | SQLite 迁移测试 1/1；真实本地数据迁移演练完成，导入分类 7、设备 10、记录 144、日志 48、管理员 2、邮件设置 1，完整性检查 `ok`；Node 最低版本声明为 22.5+ |
