@@ -1,0 +1,41 @@
+# CI：在拉取请求和 main 推送时执行语法检查、测试与前端构建。
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.5.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check server.js
+          node --check db/repository.js
+          node --check frontend/src/main.js
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build

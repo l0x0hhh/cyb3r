@@ -1,6 +1,6 @@
 # 学院设备管理系统项目导航
 
-> 最后更新：2026-09-03
+> 最后更新：2026-09-12
 > 本文是稳定规则和定位入口；当前任务与验证状态只看 [`CURRENT_STATUS.md`](CURRENT_STATUS.md)，历史记录见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 1. 项目概览
@@ -82,6 +82,7 @@
 | `public/js/anime.min.js` | Anime.js 2.2.0 静态动画依赖 | 用户端点击粒子特效按需加载 |
 | `public/js/fireworks.js` | 用户端 Canvas 粒子和圆环动画 | `/borrow` 点击特效、交互过滤和卸载清理 |
 | `vite.config.js` | Vite 根目录、代理和构建输出 | 构建或开发代理 |
+| `.github/workflows/ci.yml` | GitHub Actions CI：在 PR 和 `main` 推送时执行 Node.js 语法检查、测试和前端构建；不负责生产部署 | CI 配置或验证流程 |
 | `scripts/migrate-image-variants.js` | 旧图片 WebP 变体迁移 | 迁移或图片兼容 |
 | `test/` | 后端、前端、邮件、安全和部署契约测试 | 行为改动后补测试 |
 | `miniprogram/` | 暂缓的微信小程序普通用户端 | 仅处理小程序事项时查看 |
@@ -118,6 +119,12 @@ SQLite 运行时：`db/schema.sql` 定义目标表结构，`db/repository.js` �
 | 微信小程序 | 本文入口规则 -> `miniprogram/` | 开发者工具和真机由用户手动验证 |
 
 ## 7. 本地验证
+
+### CI 自动验证
+
+- `.github/workflows/ci.yml` 在拉取请求和推送 `main` 时运行，使用 Node.js 22.5.0 执行 `npm ci --no-audit --no-fund`、服务端/数据库/前端语法检查、`npm test` 和 `npm run build`。
+- CI 只使用 GitHub Actions 临时运行器中的源码和测试数据，不读取生产持久化目录，不发送邮件，也不执行服务器部署。
+- 生产发布仍由管理员在授权服务器终端执行 `sudo bash /opt/device-management/deploy/update-from-git.sh`；是否增加手动点击发布或自动 CD，需另行评估权限、密钥和回滚方案。
 
 ```bash
 node --check server.js
