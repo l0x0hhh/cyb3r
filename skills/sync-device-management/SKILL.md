@@ -10,7 +10,7 @@ Generate deployment instructions for this project without requiring the user to 
 ## Project constants
 
 - Local project: `E:\AIstudy\设备管理`
-- SSH target: `ubuntu@106.55.186.151`
+- SSH target: `ubuntu@43.138.146.44`
 - Application directory: `/opt/device-management`
 - Service user: `deviceapp`
 - systemd service: `device-management`
@@ -20,6 +20,16 @@ Generate deployment instructions for this project without requiring the user to 
 - Public routes: `/borrow` and `/admin`
 
 Never include passwords or personal borrowing data in commands or artifacts.
+
+## Automatic deployment (preferred after initial activation)
+
+Read `docs/CI_CD.md` for the current setup. `.github/workflows/ci.yml` verifies PRs and main; when repository variable `CD_ENABLED=true`, a successful main push or manual main run deploys that exact SHA to the new Tencent server. Initial server installation, two GitHub repository secrets and activation are still required until user-confirmed. Do not assume these are configured because the files exist locally.
+
+The release entry is root-owned `/usr/local/sbin/device-management-deploy <full-SHA>`, installed by `deploy/setup-cd.sh`. It fetches the read-only repository, prepares a separate release with `deviceapp` npm ci/build, switches `/opt/device-management` to the release, restarts once, and checks HTTP/API. Failed switching or health checks attempt to restore the previous code and dependencies, never old business data. It does not automatically update its own installed entry or apply live `/etc` configuration.
+
+After activation, ordinary delivery instructions should name the changed files, ask the user to stage the intended changes, push main, and inspect both CI and deployment results. Do not recommend Git merge/pull inside the live application: release directories contain archived source without `.git`. Every new release installs locked dependencies and builds before switching, including backend-only changes; the incremental action table below applies to the manual fallback, not release preparation.
+
+Manual file installation remains an explicit fallback while automation is disabled. For user-visible verification, honor the user's no-local-build instruction and manual browser policy; record checks not run rather than claiming success. Never run production tests while port 3000 is in use. Publishing a change to the release tooling requires a separate reviewed reinstallation using setup-cd.sh.
 
 ## Workflow
 

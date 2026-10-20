@@ -1,6 +1,6 @@
 # 学院设备管理系统项目导航
 
-> 最后更新：2026-09-12
+> 最后更新：2026-10-20
 > 本文是稳定规则和定位入口；当前任务与验证状态只看 [`CURRENT_STATUS.md`](CURRENT_STATUS.md)，历史记录见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 1. 项目概览
@@ -68,7 +68,7 @@
            -> SQLite 数据库、上传图片、二维码
 ```
 
-主要依赖：Node.js 22.5+、Express 4、Vue 3、Vite 8、Helmet、express-rate-limit、Multer、Sharp、qrcode、ExcelJS（仅工作簿功能按需加载）；运行时和迁移脚本均使用 Node 内置 `node:sqlite`，不额外引入原生编译依赖。当前 Vue 使用运行时模板，CSP 仍需 `unsafe-eval`。
+主要依赖：Node.js 22.5+、Express 4、Vue 3、Vite 8、Motion for Vue（`motion-v`）、Helmet、express-rate-limit、Multer、Sharp、qrcode、ExcelJS（仅工作簿功能按需加载）；运行时和迁移脚本均使用 Node 内置 `node:sqlite`，不额外引入原生编译依赖。当前 Vue 使用运行时模板，CSP 仍需 `unsafe-eval`。
 
 ## 4. 代码地图
 
@@ -77,12 +77,15 @@
 | `server.js` | Express API、权限、校验、SQLite 数据读写、上传、二维码和页面入口 | 后端接口、数据、隐私、安全 |
 | `db/repository.js` | SQLite 初始化、JSON 首次迁移、对象字段转换和事务封装 | 数据源切换、事务、数据库故障 |
 | `email-service.js` | SMTP 连接、认证和纯文本投递 | 邮件协议或投递问题 |
-| `frontend/src/main.js` | Vue 用户门户、答案之书彩蛋、管理后台和交互状态 | 页面行为、表单、接口调用 |
+| `frontend/src/main.js` | Vue 用户门户、答案之书彩蛋、管理后台和交互状态；页面级 Motion 进入、手势、滚动和反馈动效 | 页面行为、表单、接口调用或页面级动效 |
+| `frontend/src/components/MotionDeviceCard.tsx` | 用户端设备卡片的 Vue TSX 结构、Motion 滚动进入和图片事件转发 | 设备卡片结构、卡片入场动效或图片事件 |
 | `frontend/index.html` | HTML 入口、用户端/答案之书/管理端全局响应式样式 | 布局、视觉、移动端样式、用户端粒子层样式 |
 | `public/js/anime.min.js` | Anime.js 2.2.0 静态动画依赖 | 用户端点击粒子特效按需加载 |
 | `public/js/fireworks.js` | 用户端 Canvas 粒子和圆环动画 | `/borrow` 点击特效、交互过滤和卸载清理 |
 | `vite.config.js` | Vite 根目录、代理和构建输出 | 构建或开发代理 |
-| `.github/workflows/ci.yml` | GitHub Actions CI：在 PR 和 `main` 推送时执行 Node.js 语法检查、测试和前端构建；不负责生产部署 | CI 配置或验证流程 |
+| `tsconfig.json` | TS/TSX 类型检查、Vue JSX 保留和 bundler 模块解析 | TSX 类型问题或类型检查 |
+| `.github/workflows/ci.yml` | GitHub Actions CI/CD：PR 只检查；main 检查成功且 CD_ENABLED 开启后自动部署该提交 | CI/CD 配置或验证流程 |
+| `deploy/update-from-git.sh`、`deploy/setup-cd.sh` | 精确 SHA 发布、独立版本目录、代码回退及一次性受限 SSH 入口安装；操作见 `docs/CI_CD.md` | 自动部署与故障恢复 |
 | `scripts/migrate-image-variants.js` | 旧图片 WebP 变体迁移 | 迁移或图片兼容 |
 | `test/` | 后端、前端、邮件、安全和部署契约测试 | 行为改动后补测试 |
 | `miniprogram/` | 暂缓的微信小程序普通用户端 | 仅处理小程序事项时查看 |
@@ -122,9 +125,9 @@ SQLite 运行时：`db/schema.sql` 定义目标表结构，`db/repository.js` �
 
 ### CI 自动验证
 
-- `.github/workflows/ci.yml` 在拉取请求和推送 `main` 时运行，使用 Node.js 22.5.0 执行 `npm ci --no-audit --no-fund`、服务端/数据库 CommonJS 语法检查、`npm test` 和 `npm run build`；前端 ESM 入口由 Vite 构建解析，不使用 `node --check`。
-- CI 只使用 GitHub Actions 临时运行器中的源码和测试数据，不读取生产持久化目录，不发送邮件，也不执行服务器部署。
-- 生产发布仍由管理员在授权服务器终端执行 `sudo bash /opt/device-management/deploy/update-from-git.sh`；是否增加手动点击发布或自动 CD，需另行评估权限、密钥和回滚方案。
+- `.github/workflows/ci.yml` 在 PR、main 推送或手动运行时使用 Node.js 22.x 执行锁文件安装、CommonJS 与 Bash 语法检查、串行完整测试和前端构建；前端 ESM 入口由 Vite 解析，不使用 `node --check`。
+- verify job 仅使用 GitHub 临时运行器中的源码和测试数据，不读取生产持久化目录或部署密钥。deploy job 必须依赖 verify 成功，只接受 main push / main 手动运行且 `CD_ENABLED=true`。
+- 生产自动发布使用专用 SSH 密钥和固定 SHA 入口，准备好独立版本后切换并重启，健康检查失败尝试恢复旧代码；具体一次性配置、启用状态与风险见 [`CI_CD.md`](CI_CD.md) 及当前交接卡。文件存在不代表服务器与 GitHub 已配置成功。
 
 ```bash
 node --check server.js
@@ -138,12 +141,23 @@ npm run build
 ## 8. 生产边界
 
 - 应用目录：`/opt/device-management`；服务：`device-management`；Node 监听 `127.0.0.1:3000`；Nginx 对外提供 `https://cyb3r.art`。
-- GitHub 仓库：`git@github.com:l0x0hhh/cyb3r.git`；服务器使用只读 Deploy Key，日常更新执行 `deploy/update-from-git.sh`。
-- 脚本会根据实际改动决定依赖安装、前端构建和服务重启，并保护 `/var/lib/device-management`。手动同步必须逐文件安装并使用 `deviceapp` 所有权，不能目录级复制暂存目录元数据。
+- GitHub 仓库：`git@github.com:l0x0hhh/cyb3r.git`；新生产管理地址 `ubuntu@43.138.146.44`。自动化启用后日常推送 main，CI 通过后由固定发布入口使用服务器原只读 Deploy Key 拉取精确 SHA。
+- 发布在 `/opt/device-management-releases` 中安装锁定依赖和构建，准备完成后短暂停机切换 `/opt/device-management` 链接，保护 `/var/lib/device-management` 与 `/etc`。版本目录不带 `.git`，不能再在运行目录执行 Git 更新；手动入口为 `/usr/local/sbin/device-management-deploy <完整SHA>`。未启用自动化时的增量后备方案仍须逐文件安装并保留权限。
+- 发布失败只恢复代码和依赖，不覆盖数据库；不兼容的数据库变更需单独评审。历史版本暂不自动清理，可用磁盘不足 1 GiB 时发布在停机前停止。发布工具本身的 root 安装快照只能经管理员重新安装更新。
 - Nginx 上传请求体模板为 `22m`，应用层仍严格限制单个图片 20 MB；更新脚本不会自动写入 `/etc` 或 reload Nginx。
 - 任何部署都不得上传或覆盖 `data/`、`uploads/`、`public/qrcodes/`、`frontend/dist/`、`node_modules/` 和服务器密钥。
 
 首次部署参考 [`DEPLOY.md`](../DEPLOY.md)；同步任务必须先完整读取项目 Skill。
+
+### 跨云整站迁移
+
+跨云迁移以旧机实际运行版本为准，单独保护生产源码、持久化目录、环境密钥、服务配置和 HTTPS 证书。源码增量同步规则继续生效；整站恢复时可从旧机专用生产备份恢复已部署的前端产物，依赖在新机按锁文件重新安装，不能用本地开发数据或本地构建目录替代生产备份。
+
+目标机若已有其他服务，应使用设备管理专用目录和服务，仅新增对应域名的 Nginx 站点，不整体覆盖目标机 `/etc/nginx`。保留原 `EMAIL_CONFIG_KEY` 和 `APP_BASE_URL`，证书先核对域名、证书链与有效期。接入备案、网络入口及指定目标 IP 的 HTTPS 检查完成后，再安排正式切换。
+
+接入备案办理期间可先准备仅监听 `127.0.0.1`、`::1` 的目标站点，使用 `curl --resolve` 检查本机 HTTPS，保留原有公网默认站点。满足新接入条件后恢复对应站点的公网监听，再完成外部定向验证与域名切换。证书续期工具、账户和续期配置应同步准备，切换后确认续期验证，避免迁移证书后遗漏自动续期。
+
+预迁移副本不能作为最终生产数据：最终同步时旧机停止业务写入、新机停止设备管理服务，恢复最新一致性数据副本并核对完整性与数量，启动新机后切换域名解析。新机接收正式写入后，回滚前须先保全并处理这些新增数据，不得直接把流量切回旧数据库。迁移当前目标、机器信息和实测状态仅记录在 `CURRENT_STATUS.md`，切换确认前不要修改日常同步 Skill 的生产服务器常量。
 
 ## 9. 文档维护
 

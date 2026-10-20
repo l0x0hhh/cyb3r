@@ -1,64 +1,109 @@
-// 增量部署必须避免把上传账号的目录所有权和 0700 权限带入生产应用目录。
+// 发布边界回归：保护手动增量权限规则，并用临时目录演练代码回退与持久化保护。
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
-const skillPath = path.resolve(__dirname, '../skills/sync-device-management/SKILL.md');
-const skill = fs.readFileSync(skillPath, 'utf8');
-const updateScriptPath = path.resolve(__dirname, '../deploy/update-from-git.sh');
-const updateScript = fs.readFileSync(updateScriptPath, 'utf8');
-const nginxConfig = fs.readFileSync(path.resolve(__dirname, '../deploy/nginx.conf'), 'utf8');
+const root = path.resolve(__dirname, '..');
+const skill = fs.readFileSync(path.join(root, 'skills/sync-device-management/SKILL.md'), 'utf8');
+const scriptPath = path.join(root, 'deploy/update-from-git.sh');
+const setupSource = fs.readFileSync(path.join(root, 'deploy/setup-cd.sh'), 'utf8');
+const nginxConfig = fs.readFileSync(path.join(root, 'deploy/nginx.conf'), 'utf8');
+const linuxOnly = { skip: process.platform !== 'linux' && 'Bash integration runs on the Linux CI runner' };
 
-test('sync skill installs changed files without preserving staging directory metadata', () => {
-  assert.doesNotMatch(skill, /Copy staging contents with `sudo cp -a/);
+function bash(source, extraEnv = {}) {
+  return spawnSync('bash', ['-c', 'source "$RELEASE_SCRIPT"\n' + source], {
+    encoding: 'utf8', timeout: 10000,
+    env: { ...process.env, RELEASE_SCRIPT: scriptPath, ...extraEnv }
+  });
+}
+
+test('manual incremental fallback preserves application ownership and readability', () => {
   assert.match(skill, /sudo install[^\n]*-o deviceapp[^\n]*-g deviceapp[^\n]*-m 0644/);
   assert.match(skill, /must not preserve uploader-owned directory metadata/i);
-});
-
-test('sync skill verifies service-user traversal before building', () => {
   assert.match(skill, /namei -l/);
   assert.match(skill, /sudo -u deviceapp test -r/);
-  assert.match(skill, /package\.json/);
-  assert.match(skill, /frontend\/index\.html/);
 });
 
-// Git 更新脚本中的 npm 和 Git 命令必须在应用目录执行，不能继承调用者的当前目录。
-test('git updater runs service-user commands from the application directory', () => {
-  assert.match(updateScript, /bash -c 'cd "\$1" && shift && exec "\$@"'/);
+test('release entry accepts only a full immutable commit identifier', linuxOnly, () => {
+  for (const commit of ['a'.repeat(40), '0123456789abcdef'.repeat(2) + '01234567']) {
+    assert.equal(bash('validate_commit "$TARGET"', { TARGET: commit }).status, 0);
+  }
+  for (const commit of ['main', 'abc123', 'a'.repeat(41), 'A'.repeat(40), 'a'.repeat(40) + '; id', '--help', '$(id)']) {
+    assert.notEqual(bash('validate_commit "$TARGET"', { TARGET: commit }).status, 0, commit);
+  }
 });
 
-// 上次构建失败后，即使新提交只改部署脚本，也必须识别过期的前端产物并重建。
-test('git updater rebuilds when frontend output is older than its inputs', () => {
-  assert.match(updateScript, /frontend\/src/);
-  assert.match(updateScript, /-newer "\$\{APP_DIR\}\/frontend\/dist\/index\.html"/);
+test('source guard rejects data, secrets and generated files even with unusual filenames', linuxOnly, () => {
+  for (const file of ['data/device-management.sqlite', 'uploads/a photo.jpg', 'public/qrcodes/qr.png', 'frontend/dist/index.html', 'node_modules/a.js', '.env', 'config/.env.production', 'certs/private.key', 'data/line\nbreak']) {
+    const result = bash('printf "%s\\0" "$SOURCE_PATH" | check_source_paths', { SOURCE_PATH: file });
+    assert.notEqual(result.status, 0, file);
+  }
+  for (const file of ['.env.example', 'deploy/device-management.env.example', 'server.js', 'db/schema.sql', 'public/fonts/noto-sans-sc.css']) {
+    assert.equal(bash('printf "%s\\0" "$SOURCE_PATH" | check_source_paths', { SOURCE_PATH: file }).status, 0, file);
+  }
 });
 
-// 提交已同步但上次构建中断时，脚本必须继续执行恢复检查，不能提前退出。
-test('git updater keeps recovery checks after an already-current commit', () => {
-  assert.match(updateScript, /if \[\[ "\$\{before_commit\}" == "\$\{target_commit\}" \]\]; then/);
-  assert.doesNotMatch(updateScript, /Already up to date[\s\S]*?exit 0/);
-  assert.match(updateScript, /frontend_dist_index="\$\{APP_DIR\}\/frontend\/dist\/index\.html"/);
+test('failed release restores previous link and preserves failure status and business files', linuxOnly, t => {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'device-cd-rollback-'));
+  t.after(() => fs.rmSync(fixture, { recursive: true, force: true }));
+  for (const directory of ['previous', 'new', 'persistent']) fs.mkdirSync(path.join(fixture, directory));
+  const database = path.join(fixture, 'persistent/database');
+  fs.writeFileSync(database, 'new business writes must survive rollback');
+  fs.symlinkSync(path.join(fixture, 'new'), path.join(fixture, 'app'));
+  const result = bash(`
+APP_DIR="$FIXTURE/app"
+previous_dir="$FIXTURE/previous"
+switch_started=true
+systemctl() { printf '%s\\n' "$*" >> "$FIXTURE/service.log"; }
+health_check() { [[ "$(readlink -f "$APP_DIR")" == "$previous_dir" ]]; }
+trap on_exit EXIT
+exit 23
+`, { FIXTURE: fixture });
+  assert.equal(result.status, 23, result.stderr);
+  assert.equal(fs.realpathSync(path.join(fixture, 'app')), path.join(fixture, 'previous'));
+  assert.equal(fs.readFileSync(database, 'utf8'), 'new business writes must survive rollback');
+  assert.match(fs.readFileSync(path.join(fixture, 'service.log'), 'utf8'), /stop device-management\nstart device-management/);
+  assert.match(result.stdout, /Previous release restored/);
 });
 
-// 本次拉取包含脚本更新时，当前进程应立即切换到仓库中的新脚本继续部署。
-test('git updater re-executes itself after pulling a script update', () => {
-  assert.match(updateScript, /script_changed=false/);
-  assert.match(updateScript, /deploy\/update-from-git\.sh\)\n\s+script_changed=true/);
-  assert.match(updateScript, /exec bash "\$\{APP_DIR\}\/deploy\/update-from-git\.sh"/);
+test('preparation failure leaves the running release untouched', linuxOnly, t => {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'device-cd-prepare-'));
+  t.after(() => fs.rmSync(fixture, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(fixture, 'old'));
+  fs.symlinkSync(path.join(fixture, 'old'), path.join(fixture, 'app'));
+  const result = bash(`
+APP_DIR="$FIXTURE/app"
+previous_dir="$FIXTURE/old"
+switch_started=false
+restore_previous() { touch "$FIXTURE/unexpected-rollback"; }
+trap on_exit EXIT
+exit 17
+`, { FIXTURE: fixture });
+  assert.equal(result.status, 17);
+  assert.equal(fs.realpathSync(path.join(fixture, 'app')), path.join(fixture, 'old'));
+  assert.equal(fs.existsSync(path.join(fixture, 'unexpected-rollback')), false);
 });
 
-// 重启后的服务可能需要短暂监听时间，健康检查必须覆盖连接被拒绝的窗口。
-test('git updater retries health checks after restarting the service', () => {
-  assert.match(updateScript, /HEALTH_RETRY_COUNT="\$\{HEALTH_RETRY_COUNT:-10\}"/);
-  assert.match(updateScript, /HEALTH_RETRY_DELAY="\$\{HEALTH_RETRY_DELAY:-1\}"/);
-  assert.match(updateScript, /--retry\s+"\$\{HEALTH_RETRY_COUNT\}"/);
-  assert.match(updateScript, /--retry-delay\s+"\$\{HEALTH_RETRY_DELAY\}"/);
-  assert.match(updateScript, /--retry-connrefused/);
-  assert.match(updateScript, /--retry-max-time\s+30/);
+test('SSH forced command rejects arbitrary shell input before invoking sudo', linuxOnly, t => {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'device-cd-ssh-'));
+  t.after(() => fs.rmSync(fixture, { recursive: true, force: true }));
+  const wrapper = setupSource.match(/<<'WRAPPER'\n([\s\S]*?)\nWRAPPER/);
+  assert.ok(wrapper, 'fixed SSH wrapper must be present');
+  const wrapperPath = path.join(fixture, 'wrapper.sh');
+  fs.writeFileSync(wrapperPath, wrapper[1]);
+  for (const command of ['', 'bash', 'scp -t /tmp/file', 'deploy main', 'deploy ' + 'a'.repeat(40) + '; id']) {
+    const result = spawnSync('bash', [wrapperPath], {
+      encoding: 'utf8', timeout: 10000,
+      env: { ...process.env, SSH_ORIGINAL_COMMAND: command }
+    });
+    assert.equal(result.status, 1, command);
+    assert.match(result.stderr, /Only deploy/);
+  }
 });
 
-// Nginx 限制的是 multipart 请求体，需为应用层 20 MB 文件上限预留封装开销。
 test('nginx upload limit leaves multipart overhead above the 20 MB app limit', () => {
   assert.match(nginxConfig, /client_max_body_size\s+22m;/);
 });

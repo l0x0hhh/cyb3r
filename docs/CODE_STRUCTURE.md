@@ -6,9 +6,9 @@
 
 ## 1. 先看结论
 
-这是一个轻量单体应用：一个 Node.js/Express 进程同时提供 REST API、静态前端、上传图片和二维码；浏览器端使用 Vue 3，但暂未拆成 `.vue` 单文件组件。
+这是一个轻量单体应用：一个 Node.js/Express 进程同时提供 REST API、静态前端、上传图片和二维码；浏览器端使用 Vue 3 运行时模板，主页面仍集中在 `main.js`，用户端设备卡片另有一个 Vue TSX 组件承载 Motion 动效。
 
-网页端代码主要集中在三个文件；微信小程序位于独立的 `miniprogram/` 目录：
+网页端业务主要集中在 `main.js` 和 `index.html`，局部 TSX 组件位于 `frontend/src/components/`；微信小程序位于独立的 `miniprogram/` 目录：
 
 | 文件 | 主要职责 | 修改前优先搜索的锚点 |
 |---|---|---|
@@ -18,6 +18,7 @@
 | `scripts/migrate-json-to-sqlite.js` | 将 JSON 数据复制到 SQLite，事务导入并拒绝覆盖已有目标库 | `migrate`、`--data-dir`、`--output` |
 | `email-service.js` | 内置 SMTP 客户端和 UTF-8 纯文本邮件组装 | `sendSmtpMail`、`SmtpConnection` |
 | `frontend/src/main.js` | 用户借还页、答案之书彩蛋、管理后台、浏览器端状态和接口调用 | `const BorrowPage`、`const AnswersPage`、`const AdminPage`、函数名、模板注释 |
+| `frontend/src/components/MotionDeviceCard.tsx` | 用户端设备卡片的 Vue TSX 结构、Motion 滚动进入和图片事件转发；不承载借用业务状态 | `MotionDeviceCard`、`cardVariants`、`whileInView`、组件 emits |
 | `frontend/index.html` | HTML 入口、全局 CSS、响应式与动画 | `/* ============ 借还页`、`答案之书彩蛋`、`弹窗 & 表单`、`管理后台`、`动画` |
 | `miniprogram/services/api.js` | 小程序统一请求、API 地址、图片地址和日期格式化 | `request`、`assetUrl` |
 | `miniprogram/pages/*` | 小程序普通用户列表、详情、借用表单、归还查询页面 | `pages/borrow`、`pages/detail`、`pages/borrow-form`、`pages/return` |
@@ -52,7 +53,7 @@ flowchart TD
 | 用户端借用流程 | `frontend/src/main.js` | `const BorrowPage`、`doBorrow` | `test/frontend-source.test.js`、`test/server.test.js` |
 | 用户端归还流程 | `frontend/src/main.js`、`server.js` | `lookupReturns`、`doReturn`、`return-lookup` | 同上 |
 | 管理员邮件通知 | `server.js`、`email-service.js`、`frontend/src/main.js` | `normalizeEmailSettings`、`queueEmailNotification`、`sendSmtpMail`、`email-notifications` | `test/email-service.test.js`、`test/email-notification.test.js`、`test/server.test.js` |
-| 搜索、分类筛选、设备卡片 | `frontend/src/main.js` | `portal-chips`、`filteredDevices`、`categoryIcon` | `test/frontend-source.test.js` + 用户手动浏览器检查 |
+| 搜索、分类筛选、设备卡片 | `frontend/src/main.js`、`frontend/src/components/MotionDeviceCard.tsx` | `portal-chips`、`filteredDevices`、`MotionDeviceCard`、`categoryIcon` | `test/frontend-source.test.js` + 用户手动浏览器检查 |
 | 用户端布局、颜色、导航、动画 | `frontend/index.html` | `.portal-`、`借还页`、`prefers-reduced-motion` | `test/frontend-source.test.js` + 用户手动桌面/移动检查 |
 | 管理端页面或交互 | `frontend/src/main.js` | `const AdminPage`、对应函数名 | `test/frontend-source.test.js` + 用户手动浏览器检查 |
 | 答案之书彩蛋 | `frontend/src/main.js`、`frontend/index.html`、`server.js` | `AnswersPage`、`ANSWER_BOOK_RESPONSES`、`/answers`、`actionFeedback` | `test/frontend-source.test.js`、`test/server.test.js` + 用户手动浏览器检查 |
@@ -64,7 +65,7 @@ flowchart TD
 | 上传与图片优化 | `server.js`、`frontend/src/main.js` | `optimizeUploadedImage`、`onImageChange`、`saveDevice` | `test/server.test.js`、`test/build-config.test.js` |
 | 二维码 | `server.js`、`frontend/src/main.js` | `/api/qrcode/portal`、`generateDeviceQR` | `test/server.test.js` |
 | CSP、限流、安全头 | `server.js` | `cspDirectives`、`loginLimiter`、`borrowReturnLimiter` | `test/security-config.test.js` |
-| 构建、Vue 入口、代理 | `vite.config.js`、`package.json` | `build`、`server.proxy`、`alias` | `test/build-config.test.js`、`npm run build` |
+| 构建、Vue 入口、代理与 TSX | `vite.config.js`、`package.json`、`tsconfig.json` | `build`、`server.proxy`、`alias`、`plugin-vue-jsx` | `test/build-config.test.js`、`npx tsc --noEmit`、`npm run build` |
 | systemd、Nginx、生产目录 | `deploy/`、`DEPLOY.md` | 服务名或目录名 | `nginx -t`、`systemctl status` |
 | 增量同步生产服务器 | `skills/sync-device-management/SKILL.md` | 按 Skill 执行 | Skill 给出的同步与生产验证步骤 |
 | 微信小程序列表、筛选和图片 | `miniprogram/pages/borrow/`、`miniprogram/app.wxss` | `loadData`、`applyFilters`、`onImageLoad` | `test/miniprogram-source.test.js` + 微信开发者工具手动检查 |
@@ -79,9 +80,11 @@ flowchart TD
 ├─ email-service.js                  # 无第三方依赖的 SMTP 客户端
 ├─ package.json                      # npm 脚本与依赖
 ├─ vite.config.js                    # Vite 构建、别名和开发代理
+├─ tsconfig.json                     # TS/TSX 类型检查配置
 ├─ frontend/
 │  ├─ index.html                     # HTML 入口和全部全局 CSS
 │  ├─ src/main.js                    # BorrowPage、AdminPage、根应用
+│  ├─ src/components/MotionDeviceCard.tsx # 用户端设备卡片的 Vue TSX Motion 组件
 │  └─ dist/                          # 构建产物，禁止手工修改
 ├─ miniprogram/                      # 原生微信小程序普通用户端（独立导入开发者工具）
 │  ├─ config.js                       # AppID 与生产 API 基地址，不含 AppSecret
@@ -106,10 +109,14 @@ flowchart TD
 │  ├─ frontend-source.test.js        # 前端源码契约
 │  ├─ security-config.test.js        # 安全与生产配置
 │  ├─ build-config.test.js           # 构建、依赖、静态资源
+│  ├─ ci-workflow.test.js            # CI/CD 触发边界、提交及主机校验
+│  ├─ sync-skill.test.js             # 临时目录演练代码回退、失败状态和数据保护
 │  ├─ miniprogram-source.test.js      # 小程序配置、页面契约和图片加载样式
 │  └─ fixtures/data/                 # 测试隔离数据
 ├─ deploy/
 │  ├─ setup-server.sh                # 首次部署
+│  ├─ setup-cd.sh                    # 受限 SSH 账号和 root 固定发布入口安装
+│  ├─ update-from-git.sh             # 完整 SHA、独立版本、健康检查及代码回退
 │  ├─ device-management.service      # systemd 单元
 │  ├─ device-management.env.example  # 生产环境变量模板
 │  ├─ nginx.conf                     # Nginx 基础反代模板
@@ -119,6 +126,7 @@ flowchart TD
 │  ├─ CURRENT_STATUS.md              # 短期进度与部署状态
 │  ├─ PROJECT_GUIDE.md               # 长期产品规则与架构约定
 │  ├─ CODE_STRUCTURE.md              # 本文：代码定位地图
+│  ├─ CI_CD.md                       # 自动部署一次性接入、日常发布和故障恢复
 │  └─ plans/                          # 已确认的阶段设计
 ├─ README.md                          # 简短启动入口
 ├─ DEPLOY.md                          # 人工部署说明
@@ -407,6 +415,8 @@ npm run build
 - 生产持久化根目录：`/var/lib/device-management`。
 - 环境变量文件：`/etc/device-management.env`。
 - SMTP 凭据加密密钥：`EMAIL_CONFIG_KEY`，只放在环境变量文件，不写入 `email-settings.json` 或前端。
+- 自动部署：`.github/workflows/ci.yml` 的 verify 成功后，仅 main push / main 手动运行且 `CD_ENABLED=true` 可调用受限 SSH 入口。源码在 `/opt/device-management-releases` 构建完成后才切换应用目录；版本归档不含 `.git`，不能在应用目录里 Git pull。
+- 发布安装入口为 `/usr/local/sbin/device-management-deploy <完整SHA>`，由 `deploy/setup-cd.sh` 安装成 root 快照。发布脚本自身不会通过 Git 自动升级或改动 `/etc`；失败回退代码和依赖，保留数据库新写入，具体接入见 `docs/CI_CD.md`。
 
 任何同步任务必须先读取 `skills/sync-device-management/SKILL.md`。不得上传本地 `data/`、`uploads/`、`public/qrcodes/`、`frontend/dist/` 或 `node_modules/` 覆盖生产内容；其中 `data/email-settings.json` 包含生产邮件配置，必须保留服务器现有文件。
 

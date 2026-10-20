@@ -2,12 +2,14 @@
 
 以下方案使用 Node.js 22、systemd、Nginx 和 Let's Encrypt HTTPS。当前项目正式域名为 `cyb3r.art`。
 
+现有生产已迁至腾讯云 `43.138.146.44`（Ubuntu 26.04）；后续 CI/CD 一次性接入和日常更新请看 [`docs/CI_CD.md`](docs/CI_CD.md)。不要对已经上线的实例重跑整机初始化或覆盖持久化目录。自动化文件已实现不代表远程配置已经完成。
+
 ## 1. 准备域名和服务器
 
 在域名控制台添加 A 记录：
 
 ```text
-cyb3r.art -> 106.55.186.151
+cyb3r.art -> 43.138.146.44
 ```
 
 服务器建议使用 Ubuntu 22.04 或 24.04，并开放 TCP 端口 `22`、`80`、`443`。不要向公网开放应用端口 `3000`。
@@ -184,21 +186,22 @@ sudo systemctl status device-management
 
 确认首次接入正常后，旧源码备份目录可以保留一段时间，确认无误后再由管理员手动删除。不要删除或移动 `/var/lib/device-management`。
 
-以后每次更新的流程是：本地修改并提交后推送 GitHub，再登录服务器执行：
+完成 [`docs/CI_CD.md`](docs/CI_CD.md) 一次性配置并启用 `CD_ENABLED=true` 后，日常修改提交并推送 main，CI 成功后自动发布，不再登录服务器拉取代码。每个版本在独立目录安装依赖和构建，切换前保护当前运行版本，失败尝试回退代码与依赖。
+
+管理员手工重试已通过 CI 的提交时执行（将占位符换为完整 SHA）：
 
 ```bash
-sudo bash /opt/device-management/deploy/update-from-git.sh
+sudo /usr/local/sbin/device-management-deploy <40位已通过CI的提交SHA>
 ```
 
-该脚本会检查工作区干净、远程地址和分支正确、远程提交是快进更新，并根据变更自动决定是否执行 `npm ci`、`npm run build` 和 systemd 重启。构建或健康检查失败时命令会返回非零状态，不会把失败发布报告为成功；脚本不会修改 `/var/lib/device-management/data`、`uploads`、`qrcodes` 或邮件配置。
+脚本验证提交属于 main 历史，拒绝过时提交覆盖新版或分叉历史。每个新版本都执行独立的锁定依赖安装、构建、切换重启与健康检查；发布失败返回非零，即使恢复旧版成功也不会报告发布成功。数据库、图片、二维码及邮件环境密钥不随代码回退。对数据库结构不兼容的变更必须单独设计迁移。
 
-如果只想查看是否有更新，可以执行：
+自动化启用后，运行目录是版本符号链接且源码不含 `.git`。查看当前版本、磁盘和服务：
 
 ```bash
-sudo -u deviceapp env HOME=/var/lib/device-management \
-  GIT_SSH_COMMAND="ssh -i /var/lib/device-management/.ssh/github_deploy -o IdentitiesOnly=yes -o UserKnownHostsFile=/var/lib/device-management/.ssh/known_hosts -o StrictHostKeyChecking=yes" \
-  git -C /opt/device-management fetch --prune origin main
-sudo -u deviceapp git -C /opt/device-management status --short --branch
+readlink -f /opt/device-management
+sudo du -sh /opt/device-management-releases/*
+sudo systemctl status device-management --no-pager
 ```
 
 生产服务占用 3000 端口时不要在服务器执行 `npm test`；测试应在本地完成。

@@ -1,194 +1,207 @@
 #!/usr/bin/env bash
+# CI/CD 发布：只部署已验证的提交，独立构建、串行切换，失败仅回退代码。
 set -Eeuo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+umask 022
 
-# Fast-forward the production source, build only what changed, and verify the service.
+# 由 setup-cd.sh 安装到 root 固定入口；不从仓库重新执行自身。
+APP_DIR=/opt/device-management
+RELEASES_DIR=/opt/device-management-releases
+REPO_DIR=/var/cache/device-management/repository.git
+PERSIST_DIR=/var/lib/device-management
+RUN_USER=deviceapp
+SERVICE_NAME=device-management
+REPO_URL=git@github.com:l0x0hhh/cyb3r.git
+KEY_FILE=/var/lib/device-management/.ssh/github_deploy
+KNOWN_HOSTS=/var/lib/device-management/.ssh/known_hosts
+HEALTH_BASE_URL=http://127.0.0.1:3000
+HEALTH_RETRY_COUNT=10
+HEALTH_RETRY_DELAY=1
 
-APP_DIR="${APP_DIR:-/opt/device-management}"
-RUN_USER="${RUN_USER:-deviceapp}"
-REPO_URL="${REPO_URL:-git@github.com:l0x0hhh/cyb3r.git}"
-BRANCH="${DEPLOY_BRANCH:-main}"
-PERSIST_DIR="${PERSIST_DIR:-/var/lib/device-management}"
-SSH_DIR="${SSH_DIR:-${PERSIST_DIR}/.ssh}"
-KEY_FILE="${KEY_FILE:-${SSH_DIR}/github_deploy}"
-KNOWN_HOSTS="${KNOWN_HOSTS:-${SSH_DIR}/known_hosts}"
-SERVICE_NAME="${SERVICE_NAME:-device-management}"
-HEALTH_BASE_URL="${HEALTH_BASE_URL:-http://127.0.0.1:3000}"
-# Restarted services may need a short window before their HTTP listener accepts connections.
-HEALTH_RETRY_COUNT="${HEALTH_RETRY_COUNT:-10}"
-HEALTH_RETRY_DELAY="${HEALTH_RETRY_DELAY:-1}"
-
-fail() {
-  printf '\nERROR: %s\n' "$*" >&2
-  exit 1
-}
-
-log() {
-  printf '\n[%s] %s\n' "$(date '+%F %T')" "$*"
-}
-
-[[ "${EUID}" -eq 0 ]] || fail "Run this script with sudo."
-
-for command_name in sudo git namei systemctl curl; do
-  command -v "${command_name}" >/dev/null 2>&1 || fail "Missing required command: ${command_name}"
-done
-
-[[ -d "${APP_DIR}" ]] || fail "Application directory does not exist: ${APP_DIR}"
-[[ -d "${APP_DIR}/.git" ]] || fail "${APP_DIR} is not connected to a Git repository yet."
-[[ -r "${KEY_FILE}" ]] || fail "GitHub deploy key is not readable: ${KEY_FILE}"
-[[ -r "${KNOWN_HOSTS}" ]] || fail "GitHub known_hosts file is not readable: ${KNOWN_HOSTS}"
-
-export GIT_SSH_COMMAND="ssh -i ${KEY_FILE} -o IdentitiesOnly=yes -o UserKnownHostsFile=${KNOWN_HOSTS} -o StrictHostKeyChecking=yes"
+log() { printf '\n[%s] %s\n' "$(date '+%F %T')" "$*"; }
+fail() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
+validate_commit() { [[ "$1" =~ ^[0-9a-f]{40}$ ]]; }
 
 as_app() {
-  # Keep service-user commands inside the application tree regardless of the caller's cwd.
-  sudo -u "${RUN_USER}" env \
-    HOME="${PERSIST_DIR}" \
-    GIT_SSH_COMMAND="${GIT_SSH_COMMAND}" \
-    bash -c 'cd "$1" && shift && exec "$@"' bash "${APP_DIR}" "$@"
+  local work_dir="$1"
+  shift
+  sudo -u "${RUN_USER}" env -i \
+    PATH=/usr/bin:/bin HOME="${PERSIST_DIR}" \
+    GIT_SSH_COMMAND="ssh -i ${KEY_FILE} -o BatchMode=yes -o IdentitiesOnly=yes -o UserKnownHostsFile=${KNOWN_HOSTS} -o StrictHostKeyChecking=yes" \
+    bash -c 'cd "$1" && shift && exec "$@"' bash "${work_dir}" "$@"
+}
+git_cmd() { as_app "${REPO_DIR}" git --git-dir="${REPO_DIR}" "$@"; }
+
+# 只接受 Git 源码；生成物、业务数据及环境密钥不能进入发布版本。
+check_source_paths() {
+  local file
+  while IFS= read -r -d '' file; do
+    case "${file}" in
+      data|data/*|uploads|uploads/*|public/qrcodes|public/qrcodes/*|frontend/dist|frontend/dist/*|node_modules|node_modules/*)
+        printf 'Protected runtime path in source: %s\n' "${file}" >&2
+        return 1 ;;
+    esac
+    case "${file##*/}" in
+      .env.example) ;;
+      .env|.env.*|*.pem|*.key|*.p12|*.pfx)
+        printf 'Secret path in source: %s\n' "${file}" >&2
+        return 1 ;;
+    esac
+  done
 }
 
-git_cmd() {
-  as_app git -C "${APP_DIR}" "$@"
+health_check() {
+  local health_path
+  for health_path in /borrow /admin /api/categories; do
+    curl --noproxy '*' --fail --silent --show-error --max-time 10 \
+      --retry "${HEALTH_RETRY_COUNT}" --retry-delay "${HEALTH_RETRY_DELAY}" \
+      --retry-connrefused --retry-all-errors --retry-max-time 30 \
+      -o /dev/null "${HEALTH_BASE_URL}${health_path}" || return 1
+  done
+  systemctl is-active --quiet "${SERVICE_NAME}"
 }
 
-log "Checking repository and production workspace"
-[[ "$(git_cmd rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]] || fail "Invalid Git worktree: ${APP_DIR}"
+switch_link() {
+  local destination="$1" temporary="${APP_DIR}.next.$$"
+  ln -s -- "${destination}" "${temporary}" || return 1
+  if ! mv -Tf -- "${temporary}" "${APP_DIR}"; then
+    rm -f -- "${temporary}"
+    return 1
+  fi
+}
 
-actual_remote="$(git_cmd remote get-url origin 2>/dev/null || true)"
-[[ "${actual_remote}" == "${REPO_URL}" ]] || fail "Unexpected origin URL: ${actual_remote:-<missing>}"
+restore_previous() {
+  systemctl stop "${SERVICE_NAME}" || return 1
+  if [[ -d "${previous_dir}" ]]; then
+    switch_link "${previous_dir}" || return 1
+  elif [[ -d "${APP_DIR}" && ! -L "${APP_DIR}" ]]; then
+    # 首次发布在旧目录移动之前失败，原目录仍可直接启动。
+    :
+  else
+    printf 'Previous release is unavailable: %s\n' "${previous_dir}" >&2
+    return 1
+  fi
+  systemctl start "${SERVICE_NAME}" || return 1
+  health_check || return 1
+}
 
-current_branch="$(git_cmd symbolic-ref --short HEAD 2>/dev/null || true)"
-[[ "${current_branch}" == "${BRANCH}" ]] || fail "Expected branch ${BRANCH}, found ${current_branch:-detached HEAD}."
+on_exit() {
+  local result=$?
+  trap - EXIT INT TERM HUP
+  if [[ "${result}" -ne 0 && "${switch_started}" == true ]]; then
+    log 'Release failed; restoring previous code and dependencies (business data is unchanged by rollback)'
+    if restore_previous; then
+      log "Previous release restored: ${previous_dir}"
+    else
+      printf '\nROLLBACK FAILED: inspect systemctl status %s and release links immediately.\n' "${SERVICE_NAME}" >&2
+    fi
+  fi
+  exit "${result}"
+}
 
-workspace_status="$(git_cmd status --porcelain)"
-[[ -z "${workspace_status}" ]] || fail "Production worktree is not clean. Resolve local changes before deploying."
-
-as_app test -r "${APP_DIR}/package.json" || fail "${RUN_USER} cannot read ${APP_DIR}/package.json"
-namei -l "${APP_DIR}/package.json"
-
-if [[ -f "${APP_DIR}/frontend/index.html" ]]; then
-  as_app test -r "${APP_DIR}/frontend/index.html" || fail "${RUN_USER} cannot read ${APP_DIR}/frontend/index.html"
-  namei -l "${APP_DIR}/frontend/index.html"
-fi
-
-before_commit="$(git_cmd rev-parse HEAD)"
-log "Fetching origin/${BRANCH}"
-git_cmd fetch --prune origin "${BRANCH}"
-target_ref="origin/${BRANCH}"
-target_commit="$(git_cmd rev-parse --verify "${target_ref}")"
-
-changed_files="$(git_cmd diff --name-only "${before_commit}" "${target_commit}")"
-needs_npm_ci=false
-needs_build=false
-needs_restart=false
-script_changed=false
-
-if [[ "${before_commit}" == "${target_commit}" ]]; then
-  log "Already up to date at ${before_commit}"
-else
-  git_cmd merge-base --is-ancestor "${before_commit}" "${target_commit}" \
-    || fail "Remote history is not a fast-forward from ${before_commit}; no files were changed."
-
-  for forbidden_path in data uploads public/qrcodes frontend/dist node_modules .env .env.local .env.production; do
-    tracked_forbidden="$(git_cmd ls-tree -r --name-only "${target_ref}" -- "${forbidden_path}" || true)"
-    [[ -z "${tracked_forbidden}" ]] || fail "Remote commit tracks protected path ${forbidden_path}; deployment stopped."
+main() {
+  [[ "${EUID}" -eq 0 ]] || fail 'Run the installed entry with sudo.'
+  [[ "$#" -eq 1 ]] && validate_commit "$1" || fail 'Usage: device-management-deploy <40-character commit SHA>'
+  local target_commit="$1" main_commit before_commit='' current_name path_list
+  local release_dir legacy_dir
+  for command_name in sudo git flock systemctl curl node npm namei mktemp; do
+    command -v "${command_name}" >/dev/null || fail "Missing command: ${command_name}"
   done
 
-  if [[ -n "${changed_files}" ]]; then
-    while IFS= read -r changed_path; do
-      case "${changed_path}" in
-        package.json|package-lock.json)
-          needs_npm_ci=true
-          needs_build=true
-          needs_restart=true
-          ;;
-        server.js|email-service.js)
-          needs_restart=true
-          ;;
-        frontend/*|vite.config.js|public/*)
-          needs_build=true
-          ;;
-        deploy/update-from-git.sh)
-          script_changed=true
-          ;;
-        deploy/device-management.service|deploy/nginx.conf|deploy/setup-server.sh)
-          log "System configuration source changed: ${changed_path}; live system config is not applied by this script."
-          ;;
-      esac
-    done <<< "${changed_files}"
+  # 与 GitHub 并发组配合，也阻止手工入口同时切换目录。
+  exec 9>/run/lock/device-management-deploy.lock
+  flock -n 9 || fail 'Another deployment is running; retry after it finishes.'
+  switch_started=false
+  previous_dir=''
+  trap on_exit EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+
+  [[ -d "${APP_DIR}" ]] || fail "Missing application: ${APP_DIR}"
+  [[ -f "${PERSIST_DIR}/data/device-management.sqlite" ]] || fail 'Production database is missing; deployment will not create replacement data.'
+  [[ -r /etc/device-management.env ]] || fail 'Production environment file is missing.'
+  [[ "$(systemctl show -p User --value "${SERVICE_NAME}")" == "${RUN_USER}" ]] || fail 'Unexpected service user.'
+  [[ "$(systemctl show -p WorkingDirectory --value "${SERVICE_NAME}")" == "${APP_DIR}" ]] || fail 'Unexpected service working directory.'
+  as_app / test -r "${KEY_FILE}" || fail 'GitHub read-only deploy key is missing or unreadable.'
+  as_app / test -r "${KNOWN_HOSTS}" || fail 'GitHub known_hosts is missing or unreadable.'
+  systemctl is-active --quiet "${SERVICE_NAME}" || fail 'Production service is inactive; inspect it before deploying.'
+
+  [[ ! -L "${RELEASES_DIR}" && ! -L /var/cache/device-management && ! -L "${REPO_DIR}" ]] || fail 'Unexpected symlink in deployment storage.'
+  install -d -o root -g root -m 0755 "${RELEASES_DIR}" /var/cache/device-management
+  if [[ ! -d "${REPO_DIR}" ]]; then
+    install -d -o "${RUN_USER}" -g "${RUN_USER}" -m 0750 "${REPO_DIR}"
+    as_app "${REPO_DIR}" git init --bare "${REPO_DIR}"
+    git_cmd remote add origin "${REPO_URL}"
+  fi
+  [[ "$(git_cmd remote get-url origin)" == "${REPO_URL}" ]] || fail 'Unexpected repository origin.'
+  log 'Fetching main using the read-only GitHub key'
+  git_cmd fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+  main_commit="$(git_cmd rev-parse --verify refs/remotes/origin/main)"
+  git_cmd cat-file -e "${target_commit}^{commit}" || fail 'Requested commit was not fetched.'
+  git_cmd merge-base --is-ancestor "${target_commit}" "${main_commit}" || fail 'Requested commit is outside main history.'
+
+  if [[ -L "${APP_DIR}" ]]; then
+    previous_dir="$(readlink -f -- "${APP_DIR}")"
+    [[ "${previous_dir}" == "${RELEASES_DIR}/"* ]] || fail 'Current release points outside deployment storage.'
+    current_name="${previous_dir##*/}"
+    if [[ "${current_name}" =~ ^([0-9a-f]{40})- ]]; then before_commit="${BASH_REMATCH[1]}"; fi
+  else
+    # 首次保留整份旧源码和依赖；不要求迁移备份中的工作区干净。
+    if [[ -d "${APP_DIR}/.git" ]]; then before_commit="$(as_app "${APP_DIR}" git rev-parse HEAD)"; fi
   fi
 
-  log "Fast-forwarding ${BRANCH} from ${before_commit} to ${target_commit}"
-  git_cmd merge --ff-only "${target_ref}"
-
-  if [[ "${script_changed}" == true ]]; then
-    log "Deployment script changed; continuing with the updated script"
-    exec bash "${APP_DIR}/deploy/update-from-git.sh"
+  if [[ -n "${before_commit}" ]]; then
+    if [[ "${before_commit}" == "${target_commit}" && -L "${APP_DIR}" ]]; then
+      health_check || fail 'Already-current release failed health checks.'
+      log "Already deployed: ${target_commit}"
+      return 0
+    fi
+    if [[ "${before_commit}" != "${target_commit}" ]]; then
+      if git_cmd merge-base --is-ancestor "${target_commit}" "${before_commit}"; then
+        log "Skipping stale deployment ${target_commit}; newer code is already live."
+        return 0
+      fi
+      git_cmd merge-base --is-ancestor "${before_commit}" "${target_commit}" || fail 'Production and requested histories diverged; review manually.'
+    fi
   fi
-fi
 
-[[ -x "${APP_DIR}/node_modules/.bin/vite" ]] || {
-  needs_npm_ci=true
-  needs_build=true
-  needs_restart=true
+  [[ "$(df -Pk "${RELEASES_DIR}" | awk 'NR==2 {print $4}')" -ge 1048576 ]] || fail 'Less than 1 GiB free; review retained releases before deployment.'
+  path_list="$(mktemp /tmp/device-release-paths.XXXXXX)"
+  git_cmd ls-tree -rz --name-only "${target_commit}" > "${path_list}"
+  if ! check_source_paths < "${path_list}"; then
+    rm -f -- "${path_list}"
+    fail 'Protected paths found; no live code was changed.'
+  fi
+  rm -f -- "${path_list}"
+
+  release_dir="$(mktemp -d "${RELEASES_DIR}/${target_commit}-$(date -u +%Y%m%dT%H%M%S)-XXXXXX")"
+  chown "${RUN_USER}:${RUN_USER}" "${release_dir}"
+  chmod 0755 "${release_dir}"
+  log "Preparing exact commit ${target_commit} in ${release_dir}"
+  git_cmd archive --format=tar "${target_commit}" | as_app "${release_dir}" tar -xf -
+  namei -l "${release_dir}/package.json"
+  namei -l "${release_dir}/frontend/index.html"
+  as_app "${release_dir}" test -r package-lock.json
+  as_app "${release_dir}" test -r frontend/index.html
+  as_app "${release_dir}" npm ci --include=dev --no-audit --no-fund
+  as_app "${release_dir}" node --check server.js
+  as_app "${release_dir}" node --check db/repository.js
+  as_app "${release_dir}" npm run build
+  as_app "${release_dir}" test -r frontend/dist/index.html
+
+  # 准备完成后才停当前进程；实际数据和 /etc 均不复制或覆盖。
+  legacy_dir="${RELEASES_DIR}/legacy-$(date -u +%Y%m%dT%H%M%S)-$$"
+  if [[ ! -L "${APP_DIR}" ]]; then previous_dir="${legacy_dir}"; fi
+  switch_started=true
+  systemctl stop "${SERVICE_NAME}"
+  if [[ ! -L "${APP_DIR}" ]]; then mv -T -- "${APP_DIR}" "${legacy_dir}"; fi
+  switch_link "${release_dir}"
+  systemctl start "${SERVICE_NAME}"
+  health_check || fail 'New release failed HTTP/API checks.'
+  switch_started=false
+  log "Deployment completed at ${target_commit}"
+  log "Previous release retained: ${previous_dir}; no database rollback was performed."
 }
 
-# Recover an interrupted deployment even when the source commit is already current.
-frontend_dist_index="${APP_DIR}/frontend/dist/index.html"
-if [[ ! -f "${frontend_dist_index}" ]]; then
-  log "Frontend build output is missing or older than its inputs"
-  needs_build=true
-elif [[ -n "$(find \
-  "${APP_DIR}/frontend/src" \
-  "${APP_DIR}/frontend/index.html" \
-  "${APP_DIR}/vite.config.js" \
-  -type f \
-  -newer "${APP_DIR}/frontend/dist/index.html" \
-  -print -quit 2>/dev/null)" ]]; then
-  log "Frontend build output is missing or older than its inputs"
-  needs_build=true
-fi
-
-if [[ "${needs_npm_ci}" == true ]]; then
-  log "Installing locked Node.js dependencies"
-  as_app npm ci --no-audit --no-fund
-fi
-
-if [[ "${needs_restart}" == true ]]; then
-  as_app node --check "${APP_DIR}/server.js"
-  if [[ -f "${APP_DIR}/email-service.js" ]]; then
-    as_app node --check "${APP_DIR}/email-service.js"
-  fi
-fi
-
-if [[ "${needs_build}" == true ]]; then
-  log "Building frontend"
-  as_app npm run build
-  [[ -f "${APP_DIR}/frontend/dist/index.html" ]] || fail "Frontend build did not produce frontend/dist/index.html"
-fi
-
-if [[ "${needs_restart}" == true ]]; then
-  log "Restarting ${SERVICE_NAME}"
-  systemctl restart "${SERVICE_NAME}"
-fi
-
-systemctl is-active --quiet "${SERVICE_NAME}" || {
-  systemctl --no-pager --full status "${SERVICE_NAME}" || true
-  journalctl -u "${SERVICE_NAME}" -n 80 --no-pager || true
-  fail "${SERVICE_NAME} is not active."
-}
-
-for health_path in /borrow /admin; do
-  curl --fail --silent --show-error --max-time 15 \
-    --retry "${HEALTH_RETRY_COUNT}" \
-    --retry-delay "${HEALTH_RETRY_DELAY}" \
-    --retry-connrefused \
-    --retry-max-time 30 \
-    -o /dev/null "${HEALTH_BASE_URL}${health_path}" \
-    || fail "Health check failed: ${HEALTH_BASE_URL}${health_path}"
-done
-
-log "Deployment completed at ${target_commit}"
-if [[ "${needs_build}" != true && "${needs_restart}" != true ]]; then
-  log "Only documentation, tests, or deployment metadata changed; no build or restart was required."
-fi
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi
