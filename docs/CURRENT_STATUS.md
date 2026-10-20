@@ -5,56 +5,60 @@
 
 ## 当前目标
 
-用户已授权整理和修复前端。本批完成动效组件注册、卡片入场策略、组件数据边界和局部类型检查门禁，保留既有 Vue / Node.js / SQLite 技术栈。页面模块和后端分层仍待后续批次处理。
+用户授权推送首批前端修复并继续整理。首批提交 dc5164d 已推送 main，GitHub Actions 类型检查、测试、构建和部署全部成功；发布日志确认运行版本 dc5164d69ca0cfc4b63a3cd89a044e6f8185e9b9，完成时间 2026-10-21 00:04:57（北京时间）。
+
+第二批在本地完成：从 main.js 抽出独立的 useDevicePresentation 组合函数，统一分类图标、图片加载和裁剪状态；修复分类 ID 查不到图标、空垂直位置误当 0%、缺少变体时无效 srcset，以及同一图片后续成功加载后未清除失败状态。用户随后确认第二批无问题并要求继续，现按既有发布流程提交推送；CI/CD 结果待确认。
 
 ## 第一待办
 
-审阅并将本批修复与配套的既有前端改动一起提交。推送 main 后确认 GitHub Actions 的 typecheck、测试、构建和部署结果；随后由用户手动验收桌面和手机页面。不要只提交工作流而漏掉 package 脚本、组件、类型、tsconfig、Vite JSX 配置或锁文件。
+由用户手动检查第一批线上及第二批本地效果：分类图标、卡片与详情裁剪、图片加载/失败、切换分类与加入借用清单、桌面和手机交互。第二批代码与配套检查、类型配置、文档须作为整体提交；推送 main 后继续观察 typecheck/test/build/deploy。用户已确认第二批无问题，继续提交发布并整理借用清单状态；新的清单改动另行保留供用户检查。
 
-用户于 2026-10-21 确认已在本地运行测试、体验正常，并授权推送及继续整理。用户未提供测试命令和完整输出，不据此宣称全部检查通过。Agent 未运行本地类型检查、测试、构建或浏览器验证；本批正在提交发布，CI/CD 结果待确认。
+Agent 按用户要求未运行本地类型检查、测试、构建或浏览器验证。用户仅确认此前第一批本地运行体验正常，未提供具体测试命令及完整结果；随后也确认第二批无问题，但未提供类型检查、测试或构建的详细输出。
 
 ## 状态快照
 
 | 状态面 | 当前结论 | 证据与范围 |
 | --- | --- | --- |
-| 本地完成 | 字符串模板使用显式注册的 MotionArticle / MotionButton / MotionDiv；卡片由视口触发位移，内容默认可见，减少动态效果或缺少观察器时静态展示 | 新增 borrow-motion.js；TSX 仍可使用 motion.article |
-| 本地完成 | 卡片接收明确类型的设备和展示数据，以类型化事件向父页面回传操作；不再接收六个图片/分类处理函数 | 新增 types/device.ts；父页面按设备缓存 computed 展示数据，避免页脚计时每秒创建新对象 |
-| 本地完成 | CI 在测试、构建前增加 npm run typecheck，并新增 Node SSR 原生元素注册与动效策略回归检查 | 类型范围是 TS/TSX 与导入的显式 @ts-check 模块；既有 main.js 尚未纳入完整类型检查 |
-| 本地验证 | git diff --check 通过；部署分类确认需要 npm ci、前端构建和服务重启，无持久化目录被列入发布文件 | 静态检查结果；按用户要求未运行类型检查、测试、构建或自动浏览器检查，不能宣称这些检查通过 |
-| 服务器同步 | 既有 CI/CD 用户确认首次部署成功；本批修复尚未提交、推送或部署 | 上次部署结果不覆盖本批代码；详细首轮运行日志未重新读取 |
-| 生产验证 | 新腾讯云域名 HTTPS 页面入口和证书续期演练已通过，三个服务均 enabled / active | 来自用户回传；本批页面行为、登录、实际借还、图片二维码和真实邮件仍待人工验收 |
+| 本地完成 | 首批已提交发布：显式注册 Motion 组件、修正卡片入场策略、明确设备/事件类型、CI 类型门禁及 Node SSR 回归 | dc5164d，配套 HTML/Vite/package/锁文件均已一起提交；未包含用户的 AGENTS.md 改动 |
+| 本地完成 | 第二批将分类与图片展示从 main.js 拆至 frontend/src/composables/use-device-presentation.js，页面仅创建并暴露组合函数；main.js 减少 122 行 | 不调用业务 API，各实例图片缓存隔离，卡片仍按设备缓存 computed 展示对象 |
+| 本地完成 | 分类按接口配置的图标名称或内置 ID 映射查找，仅输出白名单 SVG；空位置默认 50%，保留显式 0%；缺少变体不拼接空 srcset，成功加载可清除旧失败状态 | 共享图片/分类类型，tsconfig 纳入组合函数；新增六项行为回归，尚未执行 |
+| 本地验证 | 第二批仅做静态差异与同步分类检查 | 未运行本地 typecheck、测试、构建或浏览器检查；不沿用第一批 CI 成功作为本批验证 |
+| 服务器同步 | 第一批已发布到新腾讯云；第二批未提交、推送或部署 | GitHub Actions run 39454107717，verify / deploy 均 success；服务器日志明确 Deployment completed at dc5164d69ca0cfc4b63a3cd89a044e6f8185e9b9 |
+| 生产验证 | 第一批自动发布健康检查通过；此前用户回传域名 HTTPS、Certbot 模拟续期、三个服务 enabled / active | 实际登录、借还、图片二维码、真实邮件及本批页面人工验收仍待用户反馈 |
+
+Actions：https://github.com/l0x0hhh/cyb3r/actions/runs/39454107717 。发布启动时 curl 首次连接拒绝后重试成功，不是最终失败；构建保留既有 ExcelJS 大 chunk 提示。
 
 ## 活跃事项
 
-1. 先完成本批 CI 和人工验收：分类切换后卡片可见、连续下滚入场、设备详情与返回、图片加载/失败、加入和移除借用清单、按钮键盘操作、减少动态效果。
-2. 后续按页面边界拆分 frontend/src/main.js，逐步建立 API、状态与展示组件边界；不将本批局部类型检查误称为前端全面 TypeScript 化。
-3. 后端仍需逐步分离接口、业务服务和数据访问；SQLite 全量集合读取/回写问题留专项处理，当前没有修改 server.js、数据库或业务 API。
+1. 完成第二批人工验收和后续 CI；类型检查仍是局部覆盖，不代表前端或后端已经全面 TypeScript 化。
+2. 后续按页面边界拆分 frontend/src/main.js，逐步分离 API、状态与展示组件；避免同时改变借还规则和页面结构。
+3. 后端接口、业务服务、数据访问仍待分层；SQLite 全量集合读取/回写问题留专项处理。本批没有修改 server.js、数据库或业务 API。
 
 ## 生产环境与发布边界
 
-- 当前生产：腾讯云轻量服务器 43.138.146.44，广州四区，2 核 / 2GB、40GB SSD、3Mbps、200GB/月；Ubuntu 26.04 x86_64，ubuntu 具备免密 sudo，已配置 2GiB Swap。
-- 公网入口：https://cyb3r.art/borrow 和 https://cyb3r.art/admin。用户回传域名 A 已指向新机，直接 HTTPS 返回 200；Certbot renew --dry-run 成功。
-- 应用：/opt/device-management；服务 device-management；应用用户 deviceapp；环境配置 /etc/device-management.env。运行时沿用 Node.js 22，精确版本以服务器输出为准。
-- 持久化目录：/var/lib/device-management/data、uploads、qrcodes；SQLite 为 data/device-management.sqlite。发布、回滚代码均不得覆盖生产数据。
-- GitHub 仓库 l0x0hhh/cyb3r，main 成功检查后发布对应 SHA。用户已确认受限 SSH 入口安装、Secrets/开关配置及首次自动部署成功。
-- 发布入口 /usr/local/sbin/device-management-deploy 由 setup-cd.sh 安装，普通前端改动无需重装该入口。每次自动发布以 deviceapp 安装锁定依赖并构建独立版本，再切换、重启和检查 HTTP/API；失败尝试恢复上一份代码与依赖，不回退业务数据。
-- 旧腾讯云 106.55.186.151 应用按最终迁移流程保持停止；京东云 111.228.27.48 和阿里云 47.119.149.116 为历史中间副本，不代表当前生产，不能直接切回旧数据库。
+- 当前生产：腾讯云轻量服务器 43.138.146.44，广州四区，2 核 / 2GB、40GB SSD、3Mbps、200GB/月；Ubuntu 26.04 x86_64，ubuntu 具备免密 sudo，2GiB Swap。
+- 公网入口：https://cyb3r.art/borrow 和 https://cyb3r.art/admin；域名 A 已指向新机。
+- 应用：/opt/device-management；服务 device-management；用户 deviceapp；环境配置 /etc/device-management.env；Node.js 22，精确版本以服务器输出为准。
+- 持久化目录：/var/lib/device-management/data、uploads、qrcodes；SQLite 为 data/device-management.sqlite。发布和代码回退不得覆盖业务数据。
+- 仓库 l0x0hhh/cyb3r；main 检查成功后按 SHA 自动发布。受限 SSH、Secrets 和开关已配置，第一批本次发布已从 Actions 日志核实。
+- 发布入口 /usr/local/sbin/device-management-deploy 由 setup-cd.sh 安装，普通前端改动无需重装。每次自动发布仍会以 deviceapp 执行 npm ci 和构建独立版本，再切换、重启与检查；失败尝试恢复上一版代码/依赖，不回退业务数据。
+- 旧腾讯云 106.55.186.151 按迁移流程保持停止；京东云 111.228.27.48 和阿里云 47.119.149.116 为历史中间副本，不能直接切回旧数据库。
 
-## 已知阻塞与边界
+## 已知边界
 
-- 本批检查尚未在 CI 执行；此前成功的构建、定向测试和部署仅是历史基线。
-- 浏览器桌面与手机检查由用户手动完成；Agent 不启动 Playwright 或安装浏览器依赖。
-- 普通用户只展示脱敏借用信息；借出设备不能下线；删除设备必须二次确认。本批未改这些业务规则。
-- 不上传 data/、uploads/、public/qrcodes/、frontend/dist/、node_modules/ 或密钥。不要在运行中的生产实例执行占用 3000 端口的集成测试。
+- 第二批仅改前端源码、类型配置、检查和文档，没有新增依赖。手动增量同步需要构建；现有自动发布仍统一执行 npm ci/build/restart。生产数据和系统配置不变。
+- 本次 Git SSH 连接未通过主机指纹校验，保留校验并用 HTTPS 成功推送；未修改 origin、SSH known_hosts 或全局 Git 配置。
+- 浏览器桌面和手机检查由用户手动完成；Agent 不启动 Playwright 或安装浏览器依赖。
+- 普通用户只看到脱敏信息；借出设备不能下线；删除设备必须二次确认，本批不变。
+- 不上传 data/、uploads/、public/qrcodes/、frontend/dist/、node_modules/ 或密钥，不在运行中的生产实例执行占用 3000 端口的集成测试。
 
-## 本轮涉及文件
+## 第二批涉及文件
 
-- 修改：frontend/src/main.js、frontend/src/components/MotionDeviceCard.tsx、package.json、tsconfig.json、.github/workflows/ci.yml、test/frontend-source.test.js、test/ci-workflow.test.js。
-- 新增：frontend/src/components/borrow-motion.js、frontend/src/types/device.ts、test/motion-components.test.js。
-- 更新说明：docs/CURRENT_STATUS.md、docs/PROJECT_GUIDE.md、docs/CODE_STRUCTURE.md、docs/CI_CD.md、docs/CHANGELOG.md。
-- 既有配套未提交改动：frontend/index.html、vite.config.js、package-lock.json，需与组件及依赖一并审阅；AGENTS.md 为用户既有改动，本轮未编辑。
-- 未改：后端、数据库、生产持久化数据、发布脚本和既有构建产物。
+- 修改：frontend/src/main.js、frontend/src/types/device.ts、tsconfig.json、test/frontend-source.test.js。
+- 新增：frontend/src/composables/use-device-presentation.js、test/device-presentation.test.js。
+- 文档：docs/CURRENT_STATUS.md、docs/PROJECT_GUIDE.md、docs/CODE_STRUCTURE.md、docs/CHANGELOG.md。
+- AGENTS.md 为用户既有改动，本轮未编辑或提交；未改后端、依赖锁文件、生产数据、发布脚本或构建产物。
 
 ## 新会话接续
 
-先读本卡，再读 PROJECT_GUIDE.md；按第一待办继续。部署时完整阅读 skills/sync-device-management/SKILL.md 与 docs/CI_CD.md。每轮更新本卡与相关导航，并向 CHANGELOG.md 追加简短记录；不把历史迁移过程复制回本卡，不把本地完成推断为已上线。
+先读本卡，再读 PROJECT_GUIDE.md，按第一待办继续；部署时完整阅读 skills/sync-device-management/SKILL.md 与 docs/CI_CD.md。每轮更新本卡及相关导航，并向 CHANGELOG.md 追加短记录；不把本地完成推断为已上线。

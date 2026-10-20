@@ -1,4 +1,4 @@
-// 前端整理契约：卡片展示数据和图片裁剪保持一致，字符串模板必须显式注册动效组件。
+// 前端职责契约：页面接入独立展示组合函数，卡片与图片裁剪仍保留模板和样式约束。
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -15,6 +15,7 @@ const documentSource = fs.readFileSync(
 const motionCardPath = path.resolve(__dirname, '../frontend/src/components/MotionDeviceCard.tsx');
 const motionCardSource = fs.existsSync(motionCardPath) ? fs.readFileSync(motionCardPath, 'utf8') : '';
 const motionConfigSource = fs.readFileSync(path.resolve(__dirname, '../frontend/src/components/borrow-motion.js'), 'utf8');
+const presentationSource = fs.readFileSync(path.resolve(__dirname, '../frontend/src/composables/use-device-presentation.js'), 'utf8');
 
 const borrowPageSource = source.slice(
   source.indexOf('const BorrowPage'),
@@ -300,12 +301,13 @@ test('images use a fixed-color blurred fade-in placeholder without shimmer', () 
 test('available devices render as a responsive waterfall using optimized thumbnails', () => {
   assert.match(borrowPageSource, /portal-page--feed/);
   assert.match(borrowPageSource, /portal-device-list--waterfall/);
-  assert.match(borrowPageSource, /item\.imageThumb \|\| item\.image/);
-  assert.match(borrowPageSource, /aspectRatio: imageDisplayAspectRatio\(item\)/);
+  assert.match(presentationSource, /item\.imageThumb \|\| item\.image/);
+  assert.match(presentationSource, /aspectRatio: imageDisplayAspectRatio\(item\)/);
   assert.match(motionCardSource, /const imageSource = view\.imageSource/);
   assert.match(borrowPageSource, /handleCardImageLoad/);
-  assert.match(borrowPageSource, /imageRatios/);
-  assert.match(borrowPageSource, /naturalWidth/);
+  assert.match(source, /import \{ useDevicePresentation \} from ['"]\.\/composables\/use-device-presentation\.js['"]/);
+  assert.match(borrowPageSource, /const devicePresentation = useDevicePresentation\(categories\)/);
+  assert.match(borrowPageSource, /\.\.\.devicePresentation/);
   assert.match(motionCardSource, /props\.entry\.index < 2 \? 'eager' : 'lazy'/);
 
   const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
@@ -316,8 +318,8 @@ test('available devices render as a responsive waterfall using optimized thumbna
 });
 
 test('available device cards apply the saved display aspect ratio and vertical position', () => {
-  assert.match(borrowPageSource, /aspectRatio: imageDisplayAspectRatio\(item\)/);
-  assert.match(borrowPageSource, /positionY: imageDisplayPositionY\(item\)/);
+  assert.match(presentationSource, /aspectRatio: imageDisplayAspectRatio\(item\)/);
+  assert.match(presentationSource, /positionY: imageDisplayPositionY\(item\)/);
   assert.match(motionCardSource, /aspectRatio:\s*view\.aspectRatio/);
   assert.match(motionCardSource, /objectPosition:\s*'50% '\s*\+\s*view\.positionY\s*\+\s*'%'/);
 });
@@ -334,7 +336,7 @@ test('portal count follows the filtered device list and animates count changes',
 test('device detail applies the saved display ratio and vertical position', () => {
   assert.match(borrowPageSource, /<div class="portal-detail__media"[^>]*:style="detailMediaStyle\(device\)"/);
   assert.match(borrowPageSource, /detailImageAspectRatio\(device\)/);
-  assert.match(borrowPageSource, /detailMediaStyle\(item\)/);
+  assert.match(presentationSource, /detailMediaStyle\(item\)/);
 
   const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
   assert.match(document, /\.portal-detail__media\s*\{[^}]*width:\s*100%[^}]*display:\s*flex/s);

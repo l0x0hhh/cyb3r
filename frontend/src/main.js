@@ -1,8 +1,9 @@
-// 前端动效整理：显式注册运行时组件，卡片接收展示数据，保留借还与图片事件。
+// 前端职责整理：页面保留借还业务，分类与图片展示状态交由独立组合函数维护。
 import * as Vue from 'vue';
 import { useReducedMotion } from 'motion-v';
 import { borrowMotionComponents } from './components/borrow-motion.js';
 import MotionDeviceCard from './components/MotionDeviceCard.tsx';
+import { useDevicePresentation } from './composables/use-device-presentation.js';
 const { createApp } = Vue;
 
 // 用户端点击特效按需加载，管理员后台不创建 Canvas 也不请求特效脚本。
@@ -598,6 +599,7 @@ const BorrowPage = {
     const searchQuery = Vue.ref('');
     const activeCategory = Vue.ref('');
     const categories = Vue.ref([]);
+    const devicePresentation = useDevicePresentation(categories);
     const filteredDevices = Vue.computed(() => {
       let list = availableDevices.value;
       if (searchQuery.value) {
@@ -626,20 +628,6 @@ const BorrowPage = {
       });
       return columns;
     });
-    function categoryIcon(icon) {
-      const svgs = {
-        camera: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2" y="6" width="16" height="11" rx="2" stroke="currentColor" stroke-width="1.4"/><circle cx="10" cy="12" r="3.5" stroke="currentColor" stroke-width="1.4"/><path d="M7 6L8 3h4l1 3" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
-        lens: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.4"/><path d="M13 13l4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
-        stabilizer: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 3v14M3 10h14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M7 6l3-3 3 3M7 14l3 3 3-3M6 7l-3 3 3 3M14 7l3 3-3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-        microphone: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="7" y="2" width="6" height="10" rx="3" stroke="currentColor" stroke-width="1.4"/><path d="M5 11a5 5 0 0010 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M10 17v-2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
-        other: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2" y="4" width="16" height="12" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M2 8h16" stroke="currentColor" stroke-width="1.4"/><path d="M8 8v8" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 1"/></svg>'
-      };
-      return svgs[icon] || svgs.other;
-    }
-    function categoryColorClass(catId) {
-      const known = ['cat-camera', 'cat-lens', 'cat-stabilizer', 'cat-microphone', 'cat-other'];
-      return known.includes(catId) ? catId : 'cat-other';
-    }
     const loadingDevices = Vue.ref(false);
     const selectedDeviceId = Vue.ref(initialDeviceId || '');
     // 列表始终保留在原生文档流中，桌面详情关闭后恢复进入前的滚动位置。
@@ -661,9 +649,6 @@ const BorrowPage = {
     const returnSelected = Vue.reactive({});
     const batchReturnNotes = Vue.ref('');
     const returnSelectedCount = Vue.computed(() => Object.keys(returnSelected).filter(id => returnSelected[id]).length);
-    const failedImages = Vue.reactive(new Set());
-    const loadedImages = Vue.reactive(new Set());
-    const imageRatios = Vue.reactive({});
     const form = Vue.reactive({
       otherDeviceName: '', borrowerName: '', borrowerId: '', borrowerPhone: '', major: '', purpose: ''
     });
@@ -717,113 +702,6 @@ const BorrowPage = {
       if (!borrowCart.length) return;
       showBorrowCart.value = false;
       showBatchBorrowForm.value = true;
-    }
-
-    function hasImage(item, source = item?.image) {
-      return !!source && !failedImages.has(source);
-    }
-
-    function markImageFailed(source) {
-      failedImages.add(source);
-    }
-
-    function markImageLoaded(source, event) {
-      if (source) loadedImages.add(source);
-      const image = event?.target;
-      if (source && image?.naturalWidth > 0 && image?.naturalHeight > 0) {
-        imageRatios[source] = `${image.naturalWidth} / ${image.naturalHeight}`;
-      }
-    }
-
-    // TSX 卡片通过事件回传图片状态，沿用借还门户原有的占位与比例记录。
-    function handleCardImageLoad(payload) {
-      markImageLoaded(payload?.source, payload?.event);
-    }
-
-    function handleCardImageError(source) {
-      markImageFailed(source);
-    }
-
-    function isImageLoaded(source) {
-      return !!source && loadedImages.has(source);
-    }
-
-    // 按设备缓存计算属性，页脚计时更新不会给每张卡片创建新的展示对象。
-    /** @type {WeakMap<import('./types/device').PortalDevice, import('vue').ComputedRef<import('./types/device').DeviceCardPresentation>>} */
-    const deviceCardPresentations = new WeakMap();
-    // 父页面统一计算展示状态，卡片无需依赖这里的六个图片/分类处理函数。
-    /**
-     * @param {import('./types/device').PortalDevice} item
-     * @returns {import('./types/device').DeviceCardPresentation}
-     */
-    function getDeviceCardPresentation(item) {
-      let presentation = deviceCardPresentations.get(item);
-      if (!presentation) {
-        presentation = Vue.computed(() => {
-          const imageSource = item.imageThumb || item.image || '';
-          return {
-            categoryClass: categoryColorClass(item.category),
-            categoryIcon: categoryIcon(item.category),
-            imageSource,
-            hasImage: hasImage(item, imageSource),
-            imageLoaded: isImageLoaded(imageSource),
-            aspectRatio: imageDisplayAspectRatio(item),
-            positionY: imageDisplayPositionY(item)
-          };
-        });
-        deviceCardPresentations.set(item, presentation);
-      }
-      return presentation.value;
-    }
-
-    function imageAspectRatio(item) {
-      const width = Number(item?.imageWidth);
-      const height = Number(item?.imageHeight);
-      if (width > 0 && height > 0) return `${width} / ${height}`;
-      const sources = [item?.imageThumb, item?.image].filter(Boolean);
-      return sources.map(source => imageRatios[source]).find(Boolean) || '4 / 3';
-    }
-
-    function imageDisplayAspectRatio(item) {
-      const ratio = Number(item?.imageDisplayAspectRatio);
-      if (Number.isFinite(ratio) && ratio >= 0.2 && ratio <= 20) return ratio;
-      return imageAspectRatio(item);
-    }
-
-    function imageDisplayPositionY(item) {
-      const position = Number(item?.imageDisplayPositionY);
-      return Number.isInteger(position) && position >= 0 && position <= 100 ? position : 50;
-    }
-
-    function buildSrcset(item) {
-      const thumb = item.imageThumb || item.image;
-      const detail = item.image;
-      if (thumb === detail) return '';
-      return `${thumb} 480w, ${detail} 1280w`;
-    }
-
-    function detailImageHeight(item) {
-      const height = Number(item?.imageDisplayHeight);
-      return Number.isInteger(height) && height >= 120 && height <= 720 ? height : null;
-    }
-
-    function detailImageAspectRatio(item) {
-      const ratio = Number(item?.imageDisplayAspectRatio);
-      return Number.isFinite(ratio) && ratio >= 0.2 && ratio <= 20 ? ratio : null;
-    }
-
-    function detailImagePositionY(item) {
-      const position = Number(item?.imageDisplayPositionY);
-      return Number.isInteger(position) && position >= 0 && position <= 100 ? position : 50;
-    }
-
-    function detailMediaStyle(item) {
-      const aspectRatio = detailImageAspectRatio(item);
-      const height = detailImageHeight(item);
-      const style = { '--detail-media-position-y': `${imageDisplayPositionY(item)}%` };
-      if (aspectRatio) style['--detail-media-aspect-ratio'] = String(aspectRatio);
-      if (!aspectRatio && height) style['--detail-media-height'] = `${height}px`;
-      return style;
     }
 
     function deviceStatusText(item) {
@@ -1172,10 +1050,10 @@ const BorrowPage = {
     return {
       activeMode, availableDevices, filteredDevices, deviceColumns, searchQuery, activeCategory, categories, loadingDevices, selectedDeviceId, device, currentBorrower,
        detailLoading, noDevice, showBorrowForm, showOtherBorrowForm, submitting, returningRecordId, returnSearched,
-      returnResults, returnToken, returnNotes, form, returnLookup, hasImage, markImageFailed,
-      markImageLoaded, handleCardImageLoad, handleCardImageError, isImageLoaded, getDeviceCardPresentation, imageAspectRatio, imageDisplayAspectRatio, imageDisplayPositionY, buildSrcset, detailImageHeight, detailImageAspectRatio, detailMediaStyle,
+      returnResults, returnToken, returnNotes, form, returnLookup,
+      ...devicePresentation,
        deviceStatusText, deviceStatusClass, isMobileDetailLayout, openDevice, closeDevice, finishCloseDevice, switchMode, doBorrow, doOtherBorrow,
-      lookupReturns, doReturn, formatDate, categoryIcon, categoryColorClass, siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping,
+      lookupReturns, doReturn, formatDate, siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping,
       MAX_BATCH_BORROW, borrowCart, showBorrowCart, showBatchBorrowForm, isInCart, toggleCartDevice, clearBorrowCart, openBatchBorrowForm, doBatchBorrow,
       returnSelected, batchReturnNotes, returnSelectedCount, toggleReturnSelect, toggleSelectAllReturns, doBatchReturn,
       actionFeedback, clearActionFeedback, prefersReducedMotion

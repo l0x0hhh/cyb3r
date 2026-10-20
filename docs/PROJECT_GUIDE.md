@@ -1,6 +1,6 @@
 # 学院设备管理系统项目导航
 
-> 最后更新：2026-10-20
+> 最后更新：2026-10-21
 > 本文是稳定规则和定位入口；当前任务与验证状态只看 [`CURRENT_STATUS.md`](CURRENT_STATUS.md)，历史记录见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 1. 项目概览
@@ -46,6 +46,7 @@
 
 - 上传仅允许 JPEG、PNG、WebP，服务端检查文件签名，单文件不超过 20 MB；Sharp 生成详情和缩略 WebP，原图迁移命令可重复执行且不删除原图。
 - 设备图片保存宽高、展示高度和垂直位置；旧数据缺失字段时必须兼容回退。
+- 用户端未设置垂直位置时居中（50%），显式设置 0% 仍保留；缺少图片变体时不生成含空地址的 srcset。列表、详情和归还图片共用独立展示状态，各次页面实例的加载缓存隔离。
 - 操作日志不得写入借用人姓名、手机号等隐私；示例、文档和测试不得提交真实密码、完整手机号或真实借用人信息。
 
 ### 邮件通知
@@ -80,7 +81,8 @@
 | `frontend/src/main.js` | Vue 用户门户、答案之书彩蛋、管理后台和交互状态；页面级 Motion 进入、手势、滚动和反馈动效 | 页面行为、表单、接口调用或页面级动效 |
 | `frontend/src/components/MotionDeviceCard.tsx` | 用户端设备卡片的 Vue TSX 结构、Motion 滚动进入和图片事件转发 | 设备卡片结构、卡片入场动效或图片事件 |
 | `frontend/src/components/borrow-motion.js` | 显式 Motion 组件注册表、卡片视口动画及无观察器/减少动态效果时的静态策略 | 字符串模板动效注册或触发问题 |
-| `frontend/src/types/device.ts` | 卡片设备字段、展示数据及图片事件的类型契约 | 卡片数据边界或事件类型 |
+| `frontend/src/composables/use-device-presentation.js` | 分类 ID 到内置 SVG 的映射、图片加载/失败缓存、裁剪与卡片展示数据；不调用业务 API | 用户端分类图标、图片兜底或展示缓存 |
+| `frontend/src/types/device.ts` | 共享图片字段、分类、卡片设备与展示数据及图片事件的类型契约 | 展示数据边界或事件类型 |
 | `frontend/index.html` | HTML 入口、用户端/答案之书/管理端全局响应式样式 | 布局、视觉、移动端样式、用户端粒子层样式 |
 | `public/js/anime.min.js` | Anime.js 2.2.0 静态动画依赖 | 用户端点击粒子特效按需加载 |
 | `public/js/fireworks.js` | 用户端 Canvas 粒子和圆环动画 | `/borrow` 点击特效、交互过滤和卸载清理 |
@@ -127,9 +129,10 @@ SQLite 运行时：`db/schema.sql` 定义目标表结构，`db/repository.js` �
 
 ### CI 自动验证
 
-- `.github/workflows/ci.yml` 在 PR、main 推送或手动运行时使用 Node.js 22.x 执行锁文件安装、CommonJS 与 Bash 语法检查、`npm run typecheck`、串行完整测试和前端构建；前端 ESM 入口由 Vite 解析，不使用 `node --check`。类型检查覆盖 TS/TSX 及显式 `@ts-check` 的动效模块，尚未覆盖全部页面 JS 和后端。
+- `.github/workflows/ci.yml` 在 PR、main 推送或手动运行时使用 Node.js 22.x 执行锁文件安装、CommonJS 与 Bash 语法检查、`npm run typecheck`、串行完整测试和前端构建；前端 ESM 入口由 Vite 解析，不使用 `node --check`。类型检查覆盖 TS/TSX、组合函数目录及导入的显式 `@ts-check` 动效模块，尚未覆盖全部页面 JS 和后端。
 - 字符串模板使用 `MotionArticle`、`MotionButton`、`MotionDiv`，通过共享注册表显式注册；不直接使用 `<motion.article>` 命名空间标签。卡片以设备字段与缓存的展示数据为输入，不接收父页面图片/分类处理函数；图标 SVG 只来自内置表。
 - 卡片保持初始可见，正常模式仅在首次进入视口时播放位移；减少动态效果或缺少 IntersectionObserver 时立即归位。`test/motion-components.test.js` 用 Node 下的 Vue 服务端渲染验证原生标签与静态策略，不启动浏览器；实际滚动、键盘和手机交互仍由用户手动检查。
+- `useDevicePresentation(categories)` 为每个借还页实例维护缓存，卡片通过 WeakMap 复用 computed 展示数据；分类异步加载或图标修改时同步更新。分类 ID 先取后台配置的图标名称，再回退内置 ID 映射和 other，只输出本地图标表。`test/device-presentation.test.js` 覆盖实际响应式缓存、分类映射、空位置、裁剪优先级及缺失图片变体；本轮是否执行仅看交接卡。
 - verify job 仅使用 GitHub 临时运行器中的源码和测试数据，不读取生产持久化目录或部署密钥。deploy job 必须依赖 verify 成功，只接受 main push / main 手动运行且 `CD_ENABLED=true`。
 - 生产自动发布使用专用 SSH 密钥和固定 SHA 入口，准备好独立版本后切换并重启，健康检查失败尝试恢复旧代码；具体一次性配置、启用状态与风险见 [`CI_CD.md`](CI_CD.md) 及当前交接卡。文件存在不代表服务器与 GitHub 已配置成功。
 

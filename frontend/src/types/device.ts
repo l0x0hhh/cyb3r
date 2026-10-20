@@ -1,5 +1,15 @@
-// 用户端卡片契约：明确设备字段、展示状态和图片事件，不把父页面处理函数传入组件。
-export interface PortalDevice {
+// 用户端展示契约：图片字段供列表、详情和归还复用，卡片与分类保留明确的数据边界。
+export interface DeviceImageFields {
+  image?: string | null;
+  imageThumb?: string | null;
+  imageWidth?: number | null;
+  imageHeight?: number | null;
+  imageDisplayHeight?: number | null;
+  imageDisplayAspectRatio?: number | null;
+  imageDisplayPositionY?: number | null;
+}
+
+export interface PortalDevice extends DeviceImageFields {
   id: string;
   name: string;
   model: string;
@@ -7,12 +17,12 @@ export interface PortalDevice {
   status: 'available' | 'borrowed';
   operationalStatus?: 'online' | 'offline';
   location?: string;
-  image?: string | null;
-  imageThumb?: string | null;
-  imageWidth?: number | null;
-  imageHeight?: number | null;
-  imageDisplayAspectRatio?: number | null;
-  imageDisplayPositionY?: number | null;
+}
+
+export interface DeviceCategory {
+  id: string;
+  name: string;
+  icon?: string | null;
 }
 
 export interface DeviceCardEntry {
