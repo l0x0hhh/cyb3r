@@ -1,0 +1,20 @@
+// 局部类型检查：覆盖 TS/TSX 和显式 @ts-check 模块，既有页面 JS 分批迁移。
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "jsx": "preserve",
+    "jsxImportSource": "vue",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "types": []
+  },
+  "include": ["frontend/src/**/*.tsx", "frontend/src/**/*.ts"]
+}

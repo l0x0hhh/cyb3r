@@ -1,12 +1,12 @@
 # GitHub Actions 自动部署
 
-目标：推送 `main` → CI 测试和构建通过 → SSH 发布同一个完整提交 SHA → 健康检查。PR 只检查，首次配置完成前部署任务跳过。当前生产目标是 `ubuntu@43.138.146.44`，公网入口为 `https://cyb3r.art`。
+目标：推送 `main` → CI 类型检查、测试和构建通过 → SSH 发布同一个完整提交 SHA → 健康检查。PR 只检查，首次配置完成前部署任务跳过。当前生产目标是 `ubuntu@43.138.146.44`，公网入口为 `https://cyb3r.art`。
 
 本地实现不等于已启用：必须先提交所需改动、配置服务器入口与 GitHub Secrets，然后打开 `CD_ENABLED`。不要将密码、私钥、数据库或真实借用记录提交到 Git。
 
 ## 1. 发布如何工作
 
-- CI 在 GitHub 托管的 Linux runner 上使用 Node.js 22.x、锁文件安装、串行测试及 Vite 构建。
+- CI 在 GitHub 托管的 Linux runner 上使用 Node.js 22.x、锁文件安装、`npm run typecheck`、串行测试及 Vite 构建。类型检查覆盖 TS/TSX 及 `@ts-check` 模块；动效注册另由 Node SSR 检查原生元素，不安装浏览器。
 - 部署 job 依赖 `verify` 成功，只允许 `main` 的 push 或手动运行；不为 PR 提供部署密钥。不设每次人工审批。
 - GitHub 使用 `device-deploy` 账号连接服务器。该密钥只有固定的 `deploy <SHA>` 入口，不能打开 shell、上传文件或转发端口。现有 `ubuntu` 管理账号不受影响。
 - 服务器用原有的只读 GitHub Deploy Key 拉取 `main`，确认 SHA 属于该历史，只构建请求的 SHA；晚到的旧提交不会覆盖已经发布的新提交。

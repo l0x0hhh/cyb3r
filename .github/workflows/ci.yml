@@ -1,4 +1,4 @@
-# CI/CD：PR 只检查；main 检查成功后使用专用 SSH 入口部署本次完整 SHA。
+# CI/CD：类型检查、测试与构建全部通过后，main 才能触发精确提交发布。
 name: CI
 
 on:
@@ -37,6 +37,9 @@ jobs:
           node --check db/repository.js
           bash -n deploy/update-from-git.sh
           bash -n deploy/setup-cd.sh
+
+      - name: Check frontend types
+        run: npm run typecheck
 
       - name: Run tests
         run: node --test --test-concurrency=1

@@ -1,4 +1,4 @@
-// 图片选区展示契约：编辑器保存的比例与位置必须进入借用卡片和详情页。
+// 前端整理契约：卡片展示数据和图片裁剪保持一致，字符串模板必须显式注册动效组件。
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -12,6 +12,9 @@ const documentSource = fs.readFileSync(
   path.resolve(__dirname, '../frontend/index.html'),
   'utf8'
 );
+const motionCardPath = path.resolve(__dirname, '../frontend/src/components/MotionDeviceCard.tsx');
+const motionCardSource = fs.existsSync(motionCardPath) ? fs.readFileSync(motionCardPath, 'utf8') : '';
+const motionConfigSource = fs.readFileSync(path.resolve(__dirname, '../frontend/src/components/borrow-motion.js'), 'utf8');
 
 const borrowPageSource = source.slice(
   source.indexOf('const BorrowPage'),
@@ -288,8 +291,8 @@ test('images use a fixed-color blurred fade-in placeholder without shimmer', () 
   assert.match(document, /\.device-card-img\s*\{[^}]*background:\s*#f0ece4[^}]*\}/s);
   assert.match(document, /\.portal-image-placeholder\s*\{[^}]*background:\s*#f0ece4[^}]*\}/s);
   assert.match(document, /\.borrow-device-image-placeholder\s*\{[^}]*background:\s*#f0ece4[^}]*\}/s);
-  assert.match(document, /\.portal-media-image\s*\{[^}]*opacity:\s*0[^}]*filter:\s*blur\(15px\)[^}]*transform:\s*scale\(1\.03\)[^}]*transition:\s*opacity \.3s ease, filter \.6s ease, transform \.6s ease/s);
-  assert.match(document, /\.portal-media-image\.is-loaded\s*\{[^}]*opacity:\s*1[^}]*filter:\s*blur\(0\)[^}]*transform:\s*scale\(1\)/s);
+  assert.match(document, /\.portal-media-image\s*\{[^}]*opacity:\s*0[^}]*transform:\s*none[^}]*transition:\s*opacity \.3s ease/s);
+  assert.match(document, /\.portal-media-image\.is-loaded\s*\{[^}]*opacity:\s*1/s);
   assert.match(document, /\.device-card-img img\s*\{[^}]*opacity:\s*0[^}]*filter:\s*blur\(15px\)[^}]*transform:\s*scale\(1\.03\)[^}]*transition:\s*opacity \.3s ease, filter \.6s ease, transform \.6s ease/s);
   assert.doesNotMatch(document, /image-shimmer|animation:\s*image-shimmer/);
 });
@@ -297,12 +300,13 @@ test('images use a fixed-color blurred fade-in placeholder without shimmer', () 
 test('available devices render as a responsive waterfall using optimized thumbnails', () => {
   assert.match(borrowPageSource, /portal-page--feed/);
   assert.match(borrowPageSource, /portal-device-list--waterfall/);
-  assert.match(borrowPageSource, /entry\.item\.imageThumb \|\| entry\.item\.image/);
-  assert.match(borrowPageSource, /imageDisplayAspectRatio\(entry\.item\)/);
-  assert.match(borrowPageSource, /markImageLoaded\(entry\.item\.imageThumb \|\| entry\.item\.image, \$event\)/);
+  assert.match(borrowPageSource, /item\.imageThumb \|\| item\.image/);
+  assert.match(borrowPageSource, /aspectRatio: imageDisplayAspectRatio\(item\)/);
+  assert.match(motionCardSource, /const imageSource = view\.imageSource/);
+  assert.match(borrowPageSource, /handleCardImageLoad/);
   assert.match(borrowPageSource, /imageRatios/);
   assert.match(borrowPageSource, /naturalWidth/);
-  assert.match(borrowPageSource, /entry\.index < 2 \? 'eager' : 'lazy'/);
+  assert.match(motionCardSource, /props\.entry\.index < 2 \? 'eager' : 'lazy'/);
 
   const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
   assert.match(document, /\.portal-device-list--waterfall\s*\{[^}]*display:\s*flex/s);
@@ -312,10 +316,10 @@ test('available devices render as a responsive waterfall using optimized thumbna
 });
 
 test('available device cards apply the saved display aspect ratio and vertical position', () => {
-  assert.match(borrowPageSource, /imageDisplayAspectRatio\(entry\.item\)/);
-  assert.match(borrowPageSource, /imageDisplayPositionY\(entry\.item\)/);
-  assert.match(borrowPageSource, /aspectRatio:\s*imageDisplayAspectRatio\(entry\.item\)/);
-  assert.match(borrowPageSource, /objectPosition:\s*'50% '\s*\+\s*imageDisplayPositionY\(entry\.item\)\s*\+\s*'%'/);
+  assert.match(borrowPageSource, /aspectRatio: imageDisplayAspectRatio\(item\)/);
+  assert.match(borrowPageSource, /positionY: imageDisplayPositionY\(item\)/);
+  assert.match(motionCardSource, /aspectRatio:\s*view\.aspectRatio/);
+  assert.match(motionCardSource, /objectPosition:\s*'50% '\s*\+\s*view\.positionY\s*\+\s*'%'/);
 });
 
 test('portal count follows the filtered device list and animates count changes', () => {
@@ -337,6 +341,13 @@ test('device detail applies the saved display ratio and vertical position', () =
   assert.match(document, /\.portal-detail__media\s*\{[^}]*justify-content:\s*center/s);
   assert.match(document, /\.portal-detail__media--fixed\s*\{[^}]*aspect-ratio:\s*var\(--detail-media-aspect-ratio/s);
   assert.match(document, /object-position:\s*50% var\(--detail-media-position-y, 50%\)/);
+});
+
+// Motion 详情容器仍必须保留完整卡片底框，避免图片和正文贴在页面背景上。
+test('motion device detail keeps a visible card frame', () => {
+  assert.match(borrowPageSource, /<MotionArticle[^>]*class="portal-detail"/);
+  assert.match(documentSource, /\.portal-detail\s*\{[^}]*display:\s*block[^}]*background:\s*var\(--card\)[^}]*border:[^}]*border-radius:[^}]*box-shadow:/s);
+  assert.match(documentSource, /\.portal-detail__body\s*\{[^}]*background:\s*var\(--card\)/s);
 });
 
 test('administrator UI exposes active-record edit and force-return actions', () => {
@@ -431,8 +442,8 @@ test('frontend source and document use UTF-8 Chinese text without replacement ch
 });
 
 test('cards use semantic article element with portal-device-row class', () => {
-  assert.match(borrowPageSource, /<article/);
-  assert.match(borrowPageSource, /class="portal-device-row"/);
+  assert.match(motionCardSource, /<motion\.article/);
+  assert.match(motionCardSource, /'portal-device-row'/);
   assert.doesNotMatch(borrowPageSource, /class="portal-device-button"/);
 });
 
@@ -899,7 +910,7 @@ test('hitokoto footer uses an accessible reduced-motion-aware typewriter effect'
   assert.match(source, /Array\.from\(text\)/);
   assert.match(source, /window\.setInterval\([\s\S]*?60/);
   assert.match(source, /window\.setTimeout\([\s\S]*?1000/);
-  assert.match(source, /prefers-reduced-motion: reduce/);
+  assert.match(source, /useReducedMotion\(\)/);
   assert.match(source, /window\.clearInterval\(typingTimerId\)/);
   assert.match(source, /window\.clearTimeout\(cursorTimerId\)/);
   assert.match(source, /isHitokotoTyping/);
@@ -931,7 +942,63 @@ test('borrow portal cleans up feedback timers and disables new motion when reque
 
   const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
   assert.match(document, /prefers-reduced-motion:\s*reduce[\s\S]*?\.portal-feedback/);
-  assert.match(document, /prefers-reduced-motion:\s*reduce[\s\S]*?\.portal-detail__scan/);
+  assert.doesNotMatch(document, /portal-device-row__scan|portal-detail__scan|@keyframes\s+(?:card-scan|detail-scan)/);
+});
+
+// Motion for Vue 只增强用户端的卡片、详情和反馈，不取代既有 Canvas 特效或管理端交互。
+test('borrow portal uses Motion for Vue for entry, gesture, scroll, and feedback animation', () => {
+  assert.match(source, /from ['"]motion-v['"]/);
+  assert.match(borrowPageSource, /<MotionArticle/);
+  assert.match(motionConfigSource, /whileInView: 'onscreen'/);
+  assert.match(borrowPageSource, /components:\s*\{\s*\.\.\.borrowMotionComponents/);
+  assert.doesNotMatch(borrowPageSource, /<\/?motion\./);
+  assert.match(borrowPageSource, /<AnimatePresence(?:\s[^>]*)?>/);
+  assert.match(borrowPageSource, /useReducedMotion/);
+  assert.doesNotMatch(source.slice(source.indexOf('const AdminPage')), /motion\./);
+});
+
+// 管理端 Tab 与弹窗应使用可进出场的 Vue 动效，并复用减少动态效果状态。
+test('administrator uses transition wrappers for tabs and modal surfaces', () => {
+  const adminSource = source.slice(source.indexOf('const AdminPage'));
+  assert.match(adminSource, /<transition[^>]+name="admin-tab"/);
+  assert.match(adminSource, /<transition[^>]+name="admin-modal"/);
+  assert.match(adminSource, /prefersReducedMotion/);
+  assert.match(documentSource, /\.admin-tab-(?:enter|leave)/);
+  assert.match(documentSource, /\.admin-modal-(?:enter|leave)/);
+});
+
+// 管理端移动导航和设备编辑层应有独立进出场过渡。
+test('administrator drawer and device editor use transition wrappers', () => {
+  const adminSource = source.slice(source.indexOf('const AdminPage'));
+  assert.match(adminSource, /<transition[^>]+name="admin-drawer"/);
+  assert.match(adminSource, /<transition[^>]+name="admin-device-modal"/);
+  assert.match(documentSource, /\.admin-drawer-enter/);
+  assert.match(documentSource, /\.admin-device-modal-enter/);
+});
+
+// 借还页是动效重点：常用弹窗、借用清单和模式内容应由 Motion 处理进出场。
+
+// 操作按钮契约：按用户指定使用明显的悬停放大与按压缩小，不改变提交逻辑。
+test('borrow actions use the requested hover and spring press gesture values', () => {
+  assert.match(borrowPageSource, /<MotionButton[\s\S]*?:whileHover="prefersReducedMotion/);
+  assert.match(borrowPageSource, /type: 'spring'/);
+  assert.match(borrowPageSource, /visualDuration: 0\.28/);
+  assert.match(borrowPageSource, /scale: 1\.03/);
+  assert.match(borrowPageSource, /scale: 0\.98/);
+});
+
+// TSX 组件契约：用户端设备卡片独立使用 Vue JSX，滚动思路借鉴示例但不绑定相同视觉参数。
+test('borrow portal renders device cards through a Vue TSX Motion component', () => {
+  assert.match(source, /import MotionDeviceCard from ['"]\.\/components\/MotionDeviceCard\.tsx['"]/);
+  assert.match(borrowPageSource, /<MotionDeviceCard[\s\S]*:entry="entry"/);
+  assert.match(borrowPageSource, /:in-cart="isInCart\(entry\.item\.id\)"/);
+  assert.match(motionCardSource, /defineComponent/);
+  assert.match(motionCardSource, /<motion\.article/);
+  assert.match(borrowPageSource, /:presentation="getDeviceCardPresentation\(entry\.item\)"/);
+  assert.match(motionCardSource, /getDeviceCardMotionProps\(props\.prefersReducedMotion, supportsViewport\)/);
+  assert.match(motionCardSource, /DeviceCardPresentation/);
+  assert.doesNotMatch(motionCardSource, /Record<string,\s*any>|type: Function/);
+  assert.doesNotMatch(motionCardSource, /whileHover|whilePress/);
 });
 
 // 用户反馈契约：顶部不重复展示列表数量，筛选结果数量仍保留在列表标题旁。

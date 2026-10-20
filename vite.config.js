@@ -1,10 +1,12 @@
 import { defineConfig } from 'vite';
+import vueJsx from '@vitejs/plugin-vue-jsx';
 import { resolve } from 'path';
 
 export default defineConfig({
   root: 'frontend',
   base: '/',
   publicDir: resolve(__dirname, 'public'),
+  plugins: [vueJsx()],
   // frontend 已是构建根目录，沿用默认 index.html 可保持 Windows/Linux 行为一致。
   build: {
     outDir: resolve(__dirname, 'frontend/dist'),

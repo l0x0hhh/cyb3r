@@ -85,6 +85,8 @@ flowchart TD
 │  ├─ index.html                     # HTML 入口和全部全局 CSS
 │  ├─ src/main.js                    # BorrowPage、AdminPage、根应用
 │  ├─ src/components/MotionDeviceCard.tsx # 用户端设备卡片的 Vue TSX Motion 组件
+│  ├─ src/components/borrow-motion.js # 字符串模板组件注册与卡片动画策略（@ts-check）
+│  ├─ src/types/device.ts            # 设备/展示数据/图片事件类型
 │  └─ dist/                          # 构建产物，禁止手工修改
 ├─ miniprogram/                      # 原生微信小程序普通用户端（独立导入开发者工具）
 │  ├─ config.js                       # AppID 与生产 API 基地址，不含 AppSecret
@@ -107,6 +109,7 @@ flowchart TD
 │  ├─ email-service.test.js          # SMTP 协议和 UTF-8 邮件契约
 │  ├─ email-notification.test.js     # 借用成功后的异步通知契约
 │  ├─ frontend-source.test.js        # 前端源码契约
+│  ├─ motion-components.test.js      # Node SSR 原生元素与视口/静态策略回归
 │  ├─ security-config.test.js        # 安全与生产配置
 │  ├─ build-config.test.js           # 构建、依赖、静态资源
 │  ├─ ci-workflow.test.js            # CI/CD 触发边界、提交及主机校验
@@ -408,6 +411,8 @@ npm run build
 
 ## 11. 构建与部署边界
 
+- 前端类型门禁：`npm run typecheck`，覆盖 TS/TSX 和显式 `@ts-check` 动效模块；并非全应用 JS 类型检查。
+- 字符串模板通过 `borrowMotionComponents` 注册 `MotionArticle/Button/Div`；TSX 卡片接收 `DeviceCardPresentation`，展示计算按设备缓存，不传父页面回调函数。
 - Vite 源入口：`frontend/index.html`。
 - Vite 产物：`frontend/dist/`，由 `npm run build` 生成。
 - systemd 服务：`device-management`，工作目录 `/opt/device-management`。

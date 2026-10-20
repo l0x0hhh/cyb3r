@@ -1,5 +1,8 @@
-// 图片选区展示：保存标准化比例，让借用卡片和详情页复用同一构图。
+// 前端动效整理：显式注册运行时组件，卡片接收展示数据，保留借还与图片事件。
 import * as Vue from 'vue';
+import { useReducedMotion } from 'motion-v';
+import { borrowMotionComponents } from './components/borrow-motion.js';
+import MotionDeviceCard from './components/MotionDeviceCard.tsx';
 const { createApp } = Vue;
 
 // 用户端点击特效按需加载，管理员后台不创建 Canvas 也不请求特效脚本。
@@ -104,6 +107,8 @@ function useSiteRuntime() {
 
 // 每次页面装载从诗词和哲学中请求一言，失败时保留本地文案。
 function useHitokoto() {
+  // 统一使用 Motion 的减少动态效果状态，避免页脚一言与其他页面各自判定产生偏差。
+  const prefersReducedMotion = useReducedMotion();
   const fallbackText = '山高水长，行稳致远。';
   const hitokotoText = Vue.ref('');
   const hitokotoUrl = Vue.ref('');
@@ -121,7 +126,7 @@ function useHitokoto() {
   function typeHitokoto(text) {
     clearTypewriterTimers();
     const chars = Array.from(text);
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+    if (prefersReducedMotion.value) {
       hitokotoText.value = text;
       isHitokotoTyping.value = false;
       return;
@@ -235,12 +240,14 @@ const BorrowPage = {
                 <p>设备可能已被删除，请返回设备列表重新选择。</p>
               </div>
 
-              <article v-else-if="device" class="portal-detail">
+              <!-- Motion 只为设备详情补充轻量入场，不改变移动端详情层与返回滚动逻辑。 -->
+              <MotionArticle v-else-if="device" class="portal-detail"
+                :initial="prefersReducedMotion ? false : { opacity: 0, y: 12 }"
+                :animate="prefersReducedMotion ? {} : { opacity: 1, y: 0 }"
+                :transition="{ duration: 0.22, ease: 'easeOut' }">
                 <div class="portal-detail__media" :class="{ 'portal-detail__media--fixed': detailImageAspectRatio(device) || detailImageHeight(device) }" :style="detailMediaStyle(device)">
                   <img v-if="hasImage(device, device.image)" :src="device.image" :srcset="buildSrcset(device)" sizes="(max-width: 560px) 100vw, 720px" :alt="device.name" :width="device.imageWidth || undefined" :height="device.imageHeight || undefined" class="portal-media-image" :class="{ 'is-loaded': isImageLoaded(device.image) }" loading="eager" fetchpriority="high" decoding="async" @load="markImageLoaded(device.image, $event)" @error="markImageFailed(device.image)" />
                   <div v-else class="portal-image-placeholder">暂无设备图片</div>
-                  <!-- 详情打开时播放一次扫描线，减少持续动画对阅读的干扰。 -->
-                  <span class="portal-detail__scan" aria-hidden="true"></span>
                 </div>
                 <div class="portal-detail__body">
                   <div class="portal-detail__heading">
@@ -272,13 +279,20 @@ const BorrowPage = {
                   </div>
 
                   <template v-else>
-                    <button class="btn btn--primary btn--full btn--lg" @click="showBorrowForm = true">填写信息并借用</button>
-                    <button class="btn btn--ghost btn--full btn--lg portal-detail__cart" :class="{ 'portal-detail__cart--active': isInCart(device.id) }" @click="toggleCartDevice(device)">
+                    <!-- 操作按钮沿用 Motion 示例的明显悬停/按压比例，方便直接观察交互效果。 -->
+                    <MotionButton type="button" class="btn btn--primary btn--full btn--lg" @click="showBorrowForm = true"
+                      :whileHover="prefersReducedMotion ? {} : { scale: 1.03 }"
+                      :whilePress="prefersReducedMotion ? {} : { scale: 0.98 }"
+                      :transition="{ duration: 0.28, scale: { type: 'spring', visualDuration: 0.28, bounce: 0.35 } }">填写信息并借用</MotionButton>
+                    <MotionButton type="button" class="btn btn--ghost btn--full btn--lg portal-detail__cart" :class="{ 'portal-detail__cart--active': isInCart(device.id) }" @click="toggleCartDevice(device)"
+                      :whileHover="prefersReducedMotion ? {} : { scale: 1.03 }"
+                      :whilePress="prefersReducedMotion ? {} : { scale: 0.98 }"
+                      :transition="{ duration: 0.28, scale: { type: 'spring', visualDuration: 0.28, bounce: 0.35 } }">
                       {{ isInCart(device.id) ? '已加入借用清单（点击移除）' : '加入借用清单' }}
-                    </button>
+                    </MotionButton>
                   </template>
                 </div>
-              </article>
+              </MotionArticle>
             </div>
           </transition>
 
@@ -308,29 +322,19 @@ const BorrowPage = {
               <div v-else class="portal-device-list portal-device-list--waterfall">
                 <!-- 按响应式列数轮流分配设备，保证前两台在移动端分别进入左右列。 -->
                 <div v-for="column in deviceColumns" :key="'device-column-' + column.id" class="portal-device-list__column">
-                  <article v-for="entry in column.items" :key="entry.item.id" class="portal-device-row" :class="['portal-device-row--' + categoryColorClass(entry.item.category), { 'portal-device-row--selected': isInCart(entry.item.id) }]" :style="{ '--card-index': entry.index }">
-                    <a :href="'/borrow?id=' + entry.item.id" :data-device-id="entry.item.id" role="button" @click.prevent="openDevice(entry.item.id)" class="portal-device-row__link">
-                      <span class="portal-device-row__media" :style="{ aspectRatio: imageDisplayAspectRatio(entry.item) }">
-                        <img v-if="hasImage(entry.item, entry.item.imageThumb || entry.item.image)" :src="entry.item.imageThumb || entry.item.image" :alt="entry.item.name" :width="entry.item.imageWidth || undefined" :height="entry.item.imageHeight || undefined" class="portal-media-image" :class="{ 'is-loaded': isImageLoaded(entry.item.imageThumb || entry.item.image) }" :style="{ objectPosition: '50% ' + imageDisplayPositionY(entry.item) + '%' }" :loading="entry.index < 2 ? 'eager' : 'lazy'" :fetchpriority="entry.index < 2 ? 'high' : 'auto'" decoding="async" @load="markImageLoaded(entry.item.imageThumb || entry.item.image, $event)" @error="markImageFailed(entry.item.imageThumb || entry.item.image)" />
-                        <span v-else class="portal-image-placeholder portal-image-placeholder--small">暂无图片</span>
-                        <!-- 设备卡片扫描层只在悬停时运行一次，不改变图片加载占位逻辑。 -->
-                        <span class="portal-device-row__scan" aria-hidden="true"></span>
-                      </span>
-                      <span class="portal-device-row__content">
-                        <span class="portal-device-row__icon" v-html="categoryIcon(entry.item.category)"></span>
-                        <strong>{{ entry.item.name }}</strong>
-                        <span>{{ entry.item.model }}</span>
-                        <small>{{ entry.item.location || '位置未填写' }}</small>
-                      </span>
-                    </a>
-                    <button
-                      v-if="entry.item.status === 'available' && entry.item.operationalStatus !== 'offline'"
-                      class="portal-device-row__cart"
-                      :class="{ 'portal-device-row__cart--active': isInCart(entry.item.id) }"
-                      :aria-pressed="isInCart(entry.item.id)"
-                      @click.stop="toggleCartDevice(entry.item)"
-                    >{{ isInCart(entry.item.id) ? '已加入 ✓' : '＋ 加入借用' }}</button>
-                  </article>
+                  <!-- 卡片滚动结构抽到 TSX，保留现有数据和图片事件，只改变动效表达方式。 -->
+                  <MotionDeviceCard
+                    v-for="entry in column.items"
+                    :key="entry.item.id"
+                    :entry="entry"
+                    :in-cart="isInCart(entry.item.id)"
+                    :prefers-reduced-motion="prefersReducedMotion"
+                    :presentation="getDeviceCardPresentation(entry.item)"
+                    @open-device="openDevice"
+                    @toggle-cart="toggleCartDevice"
+                    @image-load="handleCardImageLoad"
+                    @image-error="handleCardImageError"
+                  />
                 </div>
               </div>
             </div>
@@ -416,9 +420,13 @@ const BorrowPage = {
         </section>
       </main>
 
-      <!-- 借还结果使用非阻塞反馈，短暂展示后自动消失并允许手动关闭。 -->
-      <transition name="portal-feedback">
-        <div v-if="actionFeedback" class="portal-feedback" :class="'portal-feedback--' + actionFeedback.type" role="status" aria-live="polite">
+      <!-- 借还结果使用 Motion 处理进出场，短暂展示后自动消失并允许手动关闭。 -->
+      <AnimatePresence>
+        <MotionDiv v-if="actionFeedback" class="portal-feedback" :class="'portal-feedback--' + actionFeedback.type" role="status" aria-live="polite"
+          :initial="prefersReducedMotion ? false : { opacity: 0, y: -12 }"
+          :animate="prefersReducedMotion ? {} : { opacity: 1, y: 0 }"
+          :exit="prefersReducedMotion ? {} : { opacity: 0, y: -8 }"
+          :transition="{ duration: 0.18, ease: 'easeOut' }">
           <span class="portal-feedback__mark" aria-hidden="true">{{ actionFeedback.type === 'success' ? '✓' : actionFeedback.type === 'warning' ? '!' : '×' }}</span>
           <span class="portal-feedback__copy">
             <strong>{{ actionFeedback.title }}</strong>
@@ -426,8 +434,8 @@ const BorrowPage = {
           </span>
           <a v-if="actionFeedback.action" class="portal-feedback__action" :href="actionFeedback.action.href">{{ actionFeedback.action.label }}</a>
           <button class="portal-feedback__close" type="button" aria-label="关闭提示" @click="clearActionFeedback">×</button>
-        </div>
-      </transition>
+        </MotionDiv>
+      </AnimatePresence>
 
       <div v-if="showBorrowForm && device" class="modal-overlay" @click.self="showBorrowForm = false">
         <div class="modal">
@@ -582,6 +590,8 @@ const BorrowPage = {
   setup() {
     const siteRuntime = useSiteRuntime();
     const { hitokotoText, hitokotoUrl, isHitokotoTyping } = useHitokoto();
+    // Motion 自动读取系统减少动态效果设置，所有新增动效在该模式下保持静态。
+    const prefersReducedMotion = useReducedMotion();
     const initialDeviceId = new URLSearchParams(window.location.search).get('id');
     const activeMode = Vue.ref('borrow');
     const availableDevices = Vue.ref([]);
@@ -725,8 +735,45 @@ const BorrowPage = {
       }
     }
 
+    // TSX 卡片通过事件回传图片状态，沿用借还门户原有的占位与比例记录。
+    function handleCardImageLoad(payload) {
+      markImageLoaded(payload?.source, payload?.event);
+    }
+
+    function handleCardImageError(source) {
+      markImageFailed(source);
+    }
+
     function isImageLoaded(source) {
       return !!source && loadedImages.has(source);
+    }
+
+    // 按设备缓存计算属性，页脚计时更新不会给每张卡片创建新的展示对象。
+    /** @type {WeakMap<import('./types/device').PortalDevice, import('vue').ComputedRef<import('./types/device').DeviceCardPresentation>>} */
+    const deviceCardPresentations = new WeakMap();
+    // 父页面统一计算展示状态，卡片无需依赖这里的六个图片/分类处理函数。
+    /**
+     * @param {import('./types/device').PortalDevice} item
+     * @returns {import('./types/device').DeviceCardPresentation}
+     */
+    function getDeviceCardPresentation(item) {
+      let presentation = deviceCardPresentations.get(item);
+      if (!presentation) {
+        presentation = Vue.computed(() => {
+          const imageSource = item.imageThumb || item.image || '';
+          return {
+            categoryClass: categoryColorClass(item.category),
+            categoryIcon: categoryIcon(item.category),
+            imageSource,
+            hasImage: hasImage(item, imageSource),
+            imageLoaded: isImageLoaded(imageSource),
+            aspectRatio: imageDisplayAspectRatio(item),
+            positionY: imageDisplayPositionY(item)
+          };
+        });
+        deviceCardPresentations.set(item, presentation);
+      }
+      return presentation.value;
     }
 
     function imageAspectRatio(item) {
@@ -1126,14 +1173,16 @@ const BorrowPage = {
       activeMode, availableDevices, filteredDevices, deviceColumns, searchQuery, activeCategory, categories, loadingDevices, selectedDeviceId, device, currentBorrower,
        detailLoading, noDevice, showBorrowForm, showOtherBorrowForm, submitting, returningRecordId, returnSearched,
       returnResults, returnToken, returnNotes, form, returnLookup, hasImage, markImageFailed,
-      markImageLoaded, isImageLoaded, imageAspectRatio, imageDisplayAspectRatio, imageDisplayPositionY, buildSrcset, detailImageHeight, detailImageAspectRatio, detailMediaStyle,
+      markImageLoaded, handleCardImageLoad, handleCardImageError, isImageLoaded, getDeviceCardPresentation, imageAspectRatio, imageDisplayAspectRatio, imageDisplayPositionY, buildSrcset, detailImageHeight, detailImageAspectRatio, detailMediaStyle,
        deviceStatusText, deviceStatusClass, isMobileDetailLayout, openDevice, closeDevice, finishCloseDevice, switchMode, doBorrow, doOtherBorrow,
       lookupReturns, doReturn, formatDate, categoryIcon, categoryColorClass, siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping,
       MAX_BATCH_BORROW, borrowCart, showBorrowCart, showBatchBorrowForm, isInCart, toggleCartDevice, clearBorrowCart, openBatchBorrowForm, doBatchBorrow,
       returnSelected, batchReturnNotes, returnSelectedCount, toggleReturnSelect, toggleSelectAllReturns, doBatchReturn,
-      actionFeedback, clearActionFeedback
+      actionFeedback, clearActionFeedback, prefersReducedMotion
     };
-  }
+  },
+
+  components: { ...borrowMotionComponents, MotionDeviceCard }
 };
 
 // 答案之书页复刻参考站点的三态交互，答案和分享文案始终只在浏览器本地处理。
@@ -1165,7 +1214,7 @@ const AnswersPage = {
     let answerTimerId = null;
     let shareToastTimerId = null;
     const originalTitle = document.title;
-    const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false;
+    const prefersReducedMotion = useReducedMotion();
 
     // 用短暂翻书态还原参考站点的等待节奏，并避免连续两次抽到同一句。
     function drawAnswer() {
@@ -1367,8 +1416,11 @@ const AdminPage = {
               </section>
             </nav>
           </aside>
+          <transition name="admin-drawer" :css="!prefersReducedMotion">
           <div v-if="adminDrawerOpen" class="admin-drawer__backdrop" @click="toggleAdminDrawer"></div>
-          <aside class="admin-drawer" :class="{ 'admin-drawer--open': adminDrawerOpen }" aria-label="移动端导航">
+          </transition>
+          <transition name="admin-drawer" :css="!prefersReducedMotion">
+          <aside v-if="adminDrawerOpen" class="admin-drawer" :class="{ 'admin-drawer--open': adminDrawerOpen }" aria-label="移动端导航">
             <div class="admin-drawer__header"><strong>管理导航</strong><button type="button" class="modal-close" aria-label="关闭导航" @click="toggleAdminDrawer">×</button></div>
             <nav class="admin-menu">
               <section v-for="group in visibleNavigationGroups" :key="group.key" class="admin-menu__group">
@@ -1377,10 +1429,12 @@ const AdminPage = {
               </section>
             </nav>
           </aside>
+          </transition>
           <div class="admin-main">
             <button type="button" class="admin-mobile-menu-button" title="打开导航" aria-label="打开导航" @click="toggleAdminDrawer">☰</button>
 
         <!-- 超级管理员专属账号管理面板：普通管理员不会看到该入口。 -->
+        <transition name="admin-tab" :css="!prefersReducedMotion">
         <div v-if="activeTab === 'admin-management' && isSuperAdmin" class="tab-content">
           <div class="section-header">
             <div>
@@ -1408,6 +1462,7 @@ const AdminPage = {
             </article>
           </div>
         </div>
+        </transition>
 
         <!-- 设备列表 -->
         <div v-if="activeTab === 'devices'" class="tab-content">
@@ -2131,6 +2186,7 @@ const AdminPage = {
       </div>
 
       <!-- 所有管理员都可使用修改密码功能，提交后当前会话保持有效。 -->
+      <transition name="admin-modal" :css="!prefersReducedMotion">
       <div v-if="showPasswordModal" class="modal-overlay" @click.self="closePasswordModal">
         <div class="modal">
           <div class="modal-header">
@@ -2150,6 +2206,9 @@ const AdminPage = {
         </div>
       </div>
 
+      </transition>
+
+      <transition name="admin-device-modal" :css="!prefersReducedMotion">
       <!-- 添加/编辑设备弹窗 -->
       <div v-if="showAddDevice || showEditDevice" class="modal-overlay" @click.self="closeDeviceModal">
         <div class="modal modal--lg">
@@ -2212,6 +2271,8 @@ const AdminPage = {
         </div>
       </div>
 
+      </transition>
+
           </div>
         </div>
         <footer class="page-footer admin-footer">
@@ -2233,6 +2294,7 @@ const AdminPage = {
   setup() {
     const siteRuntime = useSiteRuntime();
     const { hitokotoText, hitokotoUrl, isHitokotoTyping } = useHitokoto();
+    const prefersReducedMotion = useReducedMotion();
     const isLoggedIn = Vue.ref(false);
     // 登录身份由服务端返回，前端只据此展示入口，真正权限仍由后端校验。
     const username = Vue.ref('admin');
@@ -3648,7 +3710,7 @@ const AdminPage = {
     });
 
     return {
-      isLoggedIn, username, password, adminUser, isSuperAdmin, loginError, submitting, devices, records, activeRecords, archivedRecords, statistics,
+      isLoggedIn, username, password, adminUser, isSuperAdmin, loginError, submitting, prefersReducedMotion, devices, records, activeRecords, archivedRecords, statistics,
           statisticsDisplay, statisticsReady, statisticsTrendAnimationKey,
       operationLogs, operationLogFilter, filteredOperationLogs,
       emailSettings, emailSettingsMessage, emailSettingsError, emailSettingsSaving, emailSettingsTesting,

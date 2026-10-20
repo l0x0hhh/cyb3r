@@ -11,6 +11,7 @@
     "dev": "node server.js",
     "dev:frontend": "vite --host 0.0.0.0",
     "build": "vite build",
+    "typecheck": "tsc --noEmit --pretty false",
     "migrate:images": "node scripts/migrate-image-variants.js",
     "migrate:sqlite": "node scripts/migrate-json-to-sqlite.js",
     "test": "node --test"
@@ -20,6 +21,7 @@
     "express": "^4.18.0",
     "express-rate-limit": "8.6.0",
     "helmet": "8.3.0",
+    "motion-v": "2.4.2",
     "multer": "2.2.0",
     "qrcode": "^1.5.0",
     "sharp": "0.34.4",
@@ -32,6 +34,8 @@
   ],
   "license": "MIT",
   "devDependencies": {
+    "@vitejs/plugin-vue-jsx": "5.1.6",
+    "typescript": "^7.0.2",
     "vite": "8.1.5"
   }
 }
