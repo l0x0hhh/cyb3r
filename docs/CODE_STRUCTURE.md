@@ -6,9 +6,9 @@
 
 ## 1. 先看结论
 
-这是一个轻量单体应用：一个 Node.js/Express 进程同时提供 REST API、静态前端、上传图片和二维码；浏览器端使用 Vue 3 运行时模板，主页面仍集中在 `main.js`，用户端设备卡片另有一个 Vue TSX 组件承载 Motion 动效。
+这是一个轻量模块化单体应用：一个 Node.js/Express 进程提供 REST API、静态前端、上传图片和二维码；借还记录域分为路由与注入依赖的业务服务。浏览器端继续 Vue 3 运行时模板，三个页面拆到 pages/，main.js 只装配入口；用户端设备卡片由 Vue TSX 组件承载 Motion 动效。
 
-网页端业务主要集中在 `main.js` 和 `index.html`，局部 TSX 组件位于 `frontend/src/components/`；微信小程序位于独立的 `miniprogram/` 目录：
+网页端交互按页面定位，全局样式仍在 index.html；共享请求、页脚和日期工具独立。微信小程序位于 miniprogram/：
 
 | 文件 | 主要职责 | 修改前优先搜索的锚点 |
 |---|---|---|
@@ -18,11 +18,16 @@
 | `backend/records/validation.js` | 手机号规范化/校验、旧字段兼容 | `normalizePhone`、`withRecordCompatibility` |
 | `backend/records/return-authorization.js` | 按实例隔离的十分钟归还凭证 | `createReturnAuthorizationStore` |
 | `backend/middleware/admin-permissions.js` | 共享管理员权限工厂，注入账号查询 | `createAdminPermissions` |
-| `db/repository.js` | SQLite 初始化、JSON 首次迁移、对象字段转换和事务封装 | `createSqliteStore`、`transaction`、表映射 |
+| `db/repository.js` | SQLite 初始化、对象转换、记录快照差异写入和事务封装 | `createSqliteStore`、`replaceRecords`、`transaction` |
 | `db/schema.sql` | SQLite 表、索引和约束定义 | `CREATE TABLE`、表名 |
 | `scripts/migrate-json-to-sqlite.js` | 将 JSON 数据复制到 SQLite，事务导入并拒绝覆盖已有目标库 | `migrate`、`--data-dir`、`--output` |
 | `email-service.js` | 内置 SMTP 客户端和 UTF-8 纯文本邮件组装 | `sendSmtpMail`、`SmtpConnection` |
-| `frontend/src/main.js` | 用户借还页、答案之书彩蛋、管理后台、浏览器端状态和接口调用 | `const BorrowPage`、`const AnswersPage`、`const AdminPage`、函数名、模板注释 |
+| `frontend/src/main.js` | 页面导入、路径选择与根应用挂载 | `isBorrowPage`、`isAdminPage`、`isAnswersPage` |
+| `frontend/src/pages/BorrowPage.js` | 借还门户模板、表单和批量交互 | `doBorrow`、`doBatchBorrow`、`lookupReturns` |
+| `frontend/src/pages/AdminPage.js` | 管理模板、权限展示、表单、图片和工作簿 | `doLogin`、`saveDevice`、`loadData` |
+| `frontend/src/pages/AnswersPage.js` | 答案三态、抽取、分享与字体预加载 | `drawAnswer`、`copyAnswer`、`preloadAnswerFont` |
+| `frontend/src/services/api.js`、`borrow-fireworks.js` | API 传输和借还页粒子脚本加载 | `apiCall`、`loadBorrowFireworks` |
+| `frontend/src/composables/use-site-footer.js`、`frontend/src/utils/date.js` | 页面实例内页脚状态与日期格式化 | `useSiteFooter`、`formatDate` |
 | `frontend/src/components/MotionDeviceCard.tsx` | 用户端设备卡片的 Vue TSX 结构和图片事件转发；不承载借用业务状态 | `MotionDeviceCard`、`getDeviceCardMotionProps`、组件 emits |
 | `frontend/src/components/borrow-motion.js` | 字符串模板的显式组件注册及卡片视口/静态动效策略 | `borrowMotionComponents`、`cardVariants`、`whileInView` |
 | `frontend/src/composables/use-device-presentation.js` | 分类图标、图片状态、裁剪回退和按设备缓存的展示数据；页面只负责接入 | `useDevicePresentation`、`getDeviceCardPresentation`、`detailMediaStyle` |
@@ -33,7 +38,7 @@
 | `miniprogram/services/api.js` | 小程序统一请求、API 地址、图片地址和日期格式化 | `request`、`assetUrl` |
 | `miniprogram/pages/*` | 小程序普通用户列表、详情、借用表单、归还查询页面 | `pages/borrow`、`pages/detail`、`pages/borrow-form`、`pages/return` |
 
-不要先通读这三个大文件。先从本文“需求到文件”表选择入口，再搜索锚点并读取相邻代码。
+先从本文“需求到文件”表选择页面或业务域，再搜索锚点并读取相邻代码。
 
 ## 2. 高层运行结构
 
@@ -60,20 +65,20 @@ flowchart TD
 
 | 需求类型 | 首要文件 | 常用搜索锚点 | 配套验证 |
 |---|---|---|---|
-| 用户端借用流程 | `frontend/src/main.js`、`frontend/src/composables/use-borrow-cart.js` | `const BorrowPage`、`doBorrow`、`doBatchBorrow`、`settleBatchBorrow` | `test/frontend-source.test.js`、`test/borrow-cart.test.js`、`test/server.test.js` |
-| 用户端归还流程 | `frontend/src/main.js`、`backend/records/` | `lookupReturns`、`doReturn`、`return-lookup` | 同上 |
-| 管理员邮件通知 | `server.js`、`email-service.js`、`frontend/src/main.js` | `normalizeEmailSettings`、`queueEmailNotification`、`sendSmtpMail`、`email-notifications` | `test/email-service.test.js`、`test/email-notification.test.js`、`test/server.test.js` |
-| 搜索、分类筛选、设备卡片 | `frontend/src/main.js`、`frontend/src/components/MotionDeviceCard.tsx`、`frontend/src/composables/use-device-presentation.js` | `portal-chips`、`filteredDevices`、`MotionDeviceCard`、`categoryIcon` | `test/frontend-source.test.js`、`test/device-presentation.test.js` + 用户手动浏览器检查 |
+| 用户端借用流程 | `frontend/src/pages/BorrowPage.js`、`frontend/src/composables/use-borrow-cart.js` | `const BorrowPage`、`doBorrow`、`doBatchBorrow`、`settleBatchBorrow` | `test/frontend-source.test.js`、`test/borrow-cart.test.js`、`test/server.test.js` |
+| 用户端归还流程 | `frontend/src/pages/BorrowPage.js`、`backend/records/` | `lookupReturns`、`doReturn`、`return-lookup` | 同上 |
+| 管理员邮件通知 | `server.js`、`email-service.js`、`frontend/src/pages/AdminPage.js` | `normalizeEmailSettings`、`queueEmailNotification`、`sendSmtpMail`、`email-notifications` | `test/email-service.test.js`、`test/email-notification.test.js`、`test/server.test.js` |
+| 搜索、分类筛选、设备卡片 | `frontend/src/pages/BorrowPage.js`、`frontend/src/components/MotionDeviceCard.tsx`、`frontend/src/composables/use-device-presentation.js` | `portal-chips`、`filteredDevices`、`MotionDeviceCard`、`categoryIcon` | `test/frontend-source.test.js`、`test/device-presentation.test.js` + 用户手动浏览器检查 |
 | 用户端布局、颜色、导航、动画 | `frontend/index.html` | `.portal-`、`借还页`、`prefers-reduced-motion` | `test/frontend-source.test.js` + 用户手动桌面/移动检查 |
-| 管理端页面或交互 | `frontend/src/main.js` | `const AdminPage`、对应函数名 | `test/frontend-source.test.js` + 用户手动浏览器检查 |
-| 答案之书彩蛋 | `frontend/src/main.js`、`frontend/index.html`、`server.js` | `AnswersPage`、`ANSWER_BOOK_RESPONSES`、`/answers`、`actionFeedback` | `test/frontend-source.test.js`、`test/server.test.js` + 用户手动浏览器检查 |
+| 管理端页面或交互 | `frontend/src/pages/AdminPage.js` | `const AdminPage`、对应函数名 | `test/frontend-source.test.js` + 用户手动浏览器检查 |
+| 答案之书彩蛋 | `frontend/src/pages/AnswersPage.js`、`frontend/index.html`、`server.js` | `AnswersPage`、`ANSWER_BOOK_RESPONSES`、`/answers`、`actionFeedback` | `test/frontend-source.test.js`、`test/server.test.js` + 用户手动浏览器检查 |
 | 管理端样式 | `frontend/index.html` | `管理后台`、`.admin-`、`.device-card` | 用户手动浏览器检查 |
 | 设备 CRUD/上下线 | `server.js` | `设备 CRUD API`、`/api/devices` | `test/server.test.js` |
-| 分类 CRUD | `server.js`、`frontend/src/main.js` | `分类 API`、`分类管理` | `test/server.test.js`、`test/frontend-source.test.js` |
+| 分类 CRUD | `server.js`、`frontend/src/pages/AdminPage.js` | `分类 API`、`分类管理` | `test/server.test.js`、`test/frontend-source.test.js` |
 | 借还记录、归档、恢复 | `backend/records/` | `createRecordRouter`、`createRecordService` | `test/backend-records.test.js`、`test/server.test.js` |
-| 登录、会话、权限 | `server.js`、`backend/middleware/admin-permissions.js`、`frontend/src/main.js` | `checkAdmin`、`sessions`、`doLogin` | `test/security-config.test.js`、`test/server.test.js` |
-| 上传与图片优化 | `server.js`、`frontend/src/main.js` | `optimizeUploadedImage`、`onImageChange`、`saveDevice` | `test/server.test.js`、`test/build-config.test.js` |
-| 二维码 | `server.js`、`frontend/src/main.js` | `/api/qrcode/portal`、`generateDeviceQR` | `test/server.test.js` |
+| 登录、会话、权限 | `server.js`、`backend/middleware/admin-permissions.js`、`frontend/src/pages/AdminPage.js` | `checkAdmin`、`sessions`、`doLogin` | `test/security-config.test.js`、`test/server.test.js` |
+| 上传与图片优化 | `server.js`、`frontend/src/pages/AdminPage.js` | `optimizeUploadedImage`、`onImageChange`、`saveDevice` | `test/server.test.js`、`test/build-config.test.js` |
+| 二维码 | `server.js`、`frontend/src/pages/AdminPage.js` | `/api/qrcode/portal`、`generateDeviceQR` | `test/server.test.js` |
 | CSP、限流、安全头 | `server.js` | `cspDirectives`、`loginLimiter`、`borrowReturnLimiter` | `test/security-config.test.js` |
 | 构建、Vue 入口、代理与 TSX | `vite.config.js`、`package.json`、`tsconfig.json` | `build`、`server.proxy`、`alias`、`plugin-vue-jsx` | `test/build-config.test.js`、`npx tsc --noEmit`、`npm run build` |
 | systemd、Nginx、生产目录 | `deploy/`、`DEPLOY.md` | 服务名或目录名 | `nginx -t`、`systemctl status` |
@@ -99,7 +104,14 @@ flowchart TD
 ├─ tsconfig.json                     # TS/TSX 类型检查配置
 ├─ frontend/
 │  ├─ index.html                     # HTML 入口和全部全局 CSS
-│  ├─ src/main.js                    # BorrowPage、AdminPage、根应用
+│  ├─ src/main.js                    # 页面导入、路径选择与根应用
+│  ├─ src/pages/BorrowPage.js         # 借还门户模板与业务状态
+│  ├─ src/pages/AdminPage.js          # 管理端模板与业务状态
+│  ├─ src/pages/AnswersPage.js        # 答案三态与字体预加载
+│  ├─ src/services/api.js            # API 传输与会话头
+│  ├─ src/services/borrow-fireworks.js # 粒子依赖按需加载
+│  ├─ src/composables/use-site-footer.js # 页脚运行时长与一言
+│  ├─ src/utils/date.js              # 共享日期格式化
 │  ├─ src/components/MotionDeviceCard.tsx # 用户端设备卡片的 Vue TSX Motion 组件
 │  ├─ src/components/borrow-motion.js # 字符串模板组件注册与卡片动画策略（@ts-check）
 │  ├─ src/composables/use-device-presentation.js # 分类/图片展示状态及卡片缓存（@ts-check）
@@ -260,11 +272,13 @@ flowchart TD
 | 页面 | `GET /borrow`、`GET /admin` | 返回同一个 `index.html` |
 | 页面 | `GET /` | 重定向到 `/borrow` |
 
-## 6. 前端 `frontend/src/main.js`
+记录集合 writeCollection 仍接收完整数组，按原转换比较数据库当前行，仅对增删改行执行 DML；显式按 rowid 保留输入顺序，中间插入或重排调整必要后缀。不新增 schema 或跨调用缓存，仍有 O(N) 读取与比较；性能未实测。五个仓储公共成员及外层事务边界保持。
+
+## 6. 前端页面与共享边界
 
 ### 6.1 共享请求层
 
-`apiCall(method, url, body)` 是唯一的通用请求入口：
+`frontend/src/services/api.js` 的 `apiCall(method, url, body)` 是通用请求入口：
 
 - 自动从 `localStorage` 读取 `sessionId` 并写入 `x-session-id`。
 - 普通对象序列化为 JSON。
@@ -274,7 +288,7 @@ flowchart TD
 
 ### 6.2 `BorrowPage`
 
-模板范围从 `const BorrowPage` 到 `const AdminPage`，包含：
+模板与 setup 位于 frontend/src/pages/BorrowPage.js，包含：
 
 - 学院品牌头与“借设备/还设备”导航。
 - 搜索框、分类标签、可借设备瀑布流。
@@ -300,7 +314,7 @@ flowchart TD
 
 ### 6.3 `AdminPage`
 
-模板使用注释划分区域，可直接搜索：`顶部导航`、`登录`、`标签切换`、`设备列表`、`当前借出`、`全部记录`、`已归档记录`、`分类管理`、`借用统计`、`操作日志`、`邮件通知`、各弹窗名称。
+模板与 setup 位于 frontend/src/pages/AdminPage.js，使用注释划分区域，可搜索：`顶部导航`、`登录`、`标签切换`、`设备列表`、`当前借出`、`全部记录`、`已归档记录`、`分类管理`、`借用统计`、`操作日志`、`邮件通知`、各弹窗名称。
 
 管理端八个 Tab 由 `tabs` 数组定义：设备管理、当前借出、全部记录、已归档、分类管理、借用统计、操作日志、邮件通知。
 
@@ -333,7 +347,7 @@ flowchart TD
 
 ### 6.4 根应用与路由
 
-没有使用 Vue Router。文件末尾根据 `window.location.pathname` 判断 `/borrow` 或 `/admin`，根组件再条件渲染 `BorrowPage`/`AdminPage`。因此新增页面路径时，需要同时修改 Express 页面路由和这里的路径判断。
+没有使用 Vue Router。main.js 根据 window.location.pathname 选择 /borrow、/admin、/answers，保留尾斜杠和 popstate 行为。新增页面路径需同时修改 Express 页面路由和入口判断。AnswersPage 的模板与状态位于独立页面；两个业务页面通过 useSiteFooter 创建各自页脚状态，不共享个人表单。
 
 ## 微信小程序 `miniprogram/`
 
@@ -425,6 +439,8 @@ backend/records/service.js 的用户归还和管理员归还在各自记录写�
 | 测试文件 | 保护范围 | 何时必须扩展 |
 |---|---|---|
 | `test/backend-records.test.js` | 注入仓储与队列、快照回滚、凭证、权限、14 个路由映射 | 后端分层边界与兼容行为变化 |
+| `test/sqlite-repository.test.js` | 内存 SQLite 的差异写入、完整快照顺序及失败回滚 | 记录快照转换、写入与事务变化 |
+| `test/frontend-api.test.js` | API 会话头、JSON/FormData 与错误传播 | 请求传输边界变化 |
 | `test/server.test.js` | API、权限、隐私、状态、归档、分类重排、图片、邮件配置 | 后端业务行为或数据字段变化 |
 | `test/email-service.test.js` | SMTP 认证、收件人、UTF-8 主题和正文编码 | SMTP 协议或邮件格式变化 |
 | `test/email-notification.test.js` | 单台/批量借还邮件、其他设备提醒、测试邮件明细、手机号脱敏与旧模板兼容 | 通知触发、模板或隐私口径变化 |
@@ -465,7 +481,7 @@ npm run build
 当前结构适合单实例、小规模内部使用；SQLite 已接管业务运行时读写，旧 JSON 仅保留为首次迁移输入和人工备份。当前还有以下明确限制：
 
 1. 借还记录域与权限中间件已拆分，server.js 仍承担配置、仓储装配、账号/会话、邮件和其余业务路由，尚未成为纯启动入口。
-2. `frontend/src/main.js` 同时包含两套大模板和全部状态，UI 小改动也容易触及长文件。
+2. main.js 已缩为入口，三个页面和请求层已拆分；AdminPage 仍较大，页面内部业务尚未全部拆成组件或组合函数。
 3. 当前仍是单实例部署；SQLite 已为关键跨表操作提供事务和 WAL，但尚未形成多实例部署、共享会话和高可用方案。
 4. 会话和归还凭证只在内存中，服务重启即失效。
 5. 邮件通知为进程内异步发送，没有持久化重试队列；SMTP 短暂不可用时可能丢失通知。
@@ -473,8 +489,8 @@ npm run build
 
 建议拆分顺序：
 
-1. 先将前端分类图标、设备卡片等纯展示片段拆为可测试组件。
-2. 再将 `BorrowPage` 和 `AdminPage` 拆为独立模块或 `.vue` 组件。
+1. 分类图标、设备卡片、展示与清单状态已独立，保留其既有边界。
+2. 三页面和 API 已独立，后续按业务继续细分 AdminPage，是否迁移 .vue/SFC 单独评审。
 3. 复用已完成的 records 域模式，后端继续按 categories/devices/admin 拆分；冻结 `db/repository.js` 的五个公共成员和同步完整快照语义。
 4. 只有在并发需求出现后再引入共享会话、任务队列或多实例协调机制，不提前增加部署复杂度。
 

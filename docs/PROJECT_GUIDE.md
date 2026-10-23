@@ -78,7 +78,9 @@
 
 | 路径 | 职责 | 何时查看 |
 | --- | --- | --- |
-| `server.js` | Express API、权限、校验、SQLite 数据读写、上传、二维码和页面入口 | 后端接口、数据、隐私、安全 |
+| `server.js` | 启动与依赖装配、会话、邮件配置、上传/二维码及尚未拆分的 API | 启动配置、设备/分类、账号、邮件与图片 |
+| `backend/records/routes.js`、`service.js` | 14 个借还记录接口的 HTTP 映射与同步业务、事务编排；仓储和邮件由入口注入 | 借还、归档恢复、权限与批量冲突 |
+| `backend/records/validation.js`、`return-authorization.js`、`backend/middleware/admin-permissions.js` | 记录字段兼容、实例内归还凭证及共享权限工厂 | 隐私、凭证和管理员权限 |
 | `db/repository.js` | SQLite 初始化、JSON 首次迁移、对象字段转换、记录完整快照差异写入和事务封装 | 数据源切换、写入效率、事务、数据库故障 |
 | `email-service.js` | SMTP 连接、认证和纯文本投递 | 邮件协议或投递问题 |
 | `frontend/src/main.js` | 页面导入、原路径选择、根应用装配与挂载 | 入口与浏览器前进后退 |
@@ -107,7 +109,9 @@
 | `data/`、`uploads/`、`public/qrcodes/` | 本地开发持久化和资源；`data/device-management.sqlite` 为运行时业务数据库，旧 JSON 仅用于首次迁移或备份 | 不提交真实数据；部署不得覆盖数据库、JSON 备份、上传和二维码 |
 | `frontend/dist/` | Vite 生成产物 | 构建生成，不手工编辑 |
 
-页面重构交付与字体基线处理见 [`tasks/frontend-pages.md`](tasks/frontend-pages.md)。页面保留字符串运行时模板；main.js 不持有业务表单或请求实现，共享组合函数不持有个人表单。
+三窗口交付见 [`tasks/frontend-pages.md`](tasks/frontend-pages.md)、[`tasks/backend-services.md`](tasks/backend-services.md)、[`tasks/sqlite-repository.md`](tasks/sqlite-repository.md)；统一整合状态见 [`tasks/refactor-integration.md`](tasks/refactor-integration.md)。页面保留字符串运行时模板；main.js 不持有业务表单或请求实现，共享组合函数不持有个人表单。
+
+记录域按 routes → service → 注入仓储分层，不导入 server.js 或启动第二个服务。6 个公共接口复用原借还限流器，8 个管理接口分别检查 records 权限；会话装配仍在入口，权限工厂实时读取管理员账号。邮件沿原队列在提交后发送，原 HTTP 状态/响应与归还凭证消费时点保留。本批没有拆设备、分类、账号和邮件配置域，也没有改变数据库 schema。
 
 详细文件锚点、调用链和数据写入关系见 [`CODE_STRUCTURE.md`](CODE_STRUCTURE.md)。
 

@@ -1,6 +1,6 @@
 # 多窗口重构任务说明
 
-> 基线：生产最近确认 `99d65b1`。A 分支在独立 worktree 保存字体快照提交 `b159cf9` 后实施前端拆分；原窗口字体工作区保持原样，均未推送或部署。A 交付见 docs/tasks/frontend-pages.md。
+> 三个窗口已完成并按 C → B → A 整合到 codex/integrate-refactor，尚未发布。线上仍为字体版 764ffb0。A 的 b159cf9 是等价字体快照，整合只取其后的 1c6fee8。统一报告见 docs/tasks/refactor-integration.md；下方原任务提示词保留作范围记录，不需重新执行。
 
 ## 协作方式
 
@@ -8,10 +8,10 @@
 
 | 窗口 | 工作范围 | 建议分支 | 开始时机 |
 | --- | --- | --- | --- |
-| 当前窗口 | 答案之书字体、预加载、任务划分、最终整合 | 当前工作区 | 正在处理 |
-| A | 前端页面与 API 拆分，公共前端入口由这一窗口统一修改 | codex/frontend-pages | 已从字体快照 b159cf9 开始，本地交付待整合 |
-| B | 后端路由、业务与权限的职责拆分 | codex/backend-services | 可从已提交的 99d65b1 开始，与 C 并行 |
-| C | SQLite 仓储内部写入优化，保留对外接口和数据兼容 | codex/sqlite-repository | 可从已提交的 99d65b1 开始，与 B 并行 |
+| 当前窗口 | 最终整合、统一文档与后续发布协调 | codex/integrate-refactor | 本地整合完成，等待用户验收 |
+| A | 前端页面与 API 拆分 | codex/frontend-pages | 1c6fee8 已整合为 ac7cf7f |
+| B | 借还记录域分层 | codex/backend-services | 46ce5e7 已整合为 79f5ee5 |
+| C | SQLite 记录完整快照差异写入 | codex/sqlite-repository | e8c4f4b 已整合为 46da583 |
 
 前端页面拆分与前端 API 拆分放在 A 的一个任务内，因为二者会同时修改 main.js。B 与 C 以固定仓储接口协作：`createSqliteStore` 返回 `databasePath/readCollection/writeCollection/transaction/close`，同步调用、完整快照写入语义不变。
 
@@ -68,4 +68,4 @@
 3. 主窗口统一处理共享文档和冲突，查看完整文件清单与差异，不使用整目录覆盖或强制推送。
 4. 用户确认后推送 main，让现有 CI 统一执行类型检查、完整测试和构建，再由 CD 按 SHA 发布。各窗口不得自行部署。
 
-A 已在 codex/frontend-pages 的独立 worktree 实施；本文不代表 B/C 已创建或完成。原窗口若独立提交字体，整合 A 时先核对字体快照等价性，再只合入重构提交，避免重复携带基线。
+三窗口任务由用户各自执行并交付；主窗口只整合已提交成果，未创建额外任务或重做各分支。
