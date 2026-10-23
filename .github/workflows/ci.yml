@@ -1,4 +1,4 @@
-# CI/CD：类型检查、测试与构建全部通过后，main 才能触发精确提交发布。
+# CI/CD：Action 使用 Node 24 运行时，项目选择最新 Node 22 补丁，检查通过后精确发布。
 name: CI
 
 on:
@@ -18,14 +18,15 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22.x
+          check-latest: true
           cache: npm
 
       - name: Install locked dependencies

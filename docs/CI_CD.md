@@ -7,6 +7,7 @@
 ## 1. 发布如何工作
 
 - CI 在 GitHub 托管的 Linux runner 上使用 Node.js 22.x、锁文件安装、`npm run typecheck`、串行测试及 Vite 构建。类型检查覆盖 TS/TSX 及 `@ts-check` 模块；动效注册另由 Node SSR 检查原生元素，不安装浏览器。
+- checkout/setup-node 均使用官方 v7，Action 自身采用 Node 24 运行时；项目仍由 node-version: 22.x 选择 Node 22。check-latest: true 在每次运行时核对最新 22.x 补丁，避免优先使用旧工具缓存。保留 persist-credentials: false 和显式 npm 缓存；这不会升级服务器的 Node 包。参考官方 action.yml：https://github.com/actions/checkout/blob/v7/action.yml 、https://github.com/actions/setup-node/blob/v7/action.yml 。
 - 部署 job 依赖 `verify` 成功，只允许 `main` 的 push 或手动运行；不为 PR 提供部署密钥。不设每次人工审批。
 - GitHub 使用 `device-deploy` 账号连接服务器。该密钥只有固定的 `deploy <SHA>` 入口，不能打开 shell、上传文件或转发端口。现有 `ubuntu` 管理账号不受影响。
 - 服务器用原有的只读 GitHub Deploy Key 拉取 `main`，确认 SHA 属于该历史，只构建请求的 SHA；晚到的旧提交不会覆盖已经发布的新提交。
