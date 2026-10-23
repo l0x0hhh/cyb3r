@@ -1,13 +1,20 @@
-// 前端职责契约：独立展示与借用清单接回页面，失败结果不得清空清单或个人表单。
+// 前端职责契约按实际模块定位，保留隐私、表单、批量结算与视觉行为要求。
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const source = fs.readFileSync(
-  path.resolve(__dirname, '../frontend/src/main.js'),
-  'utf8'
-);
+const readFrontend = relativePath => fs.readFileSync(path.resolve(__dirname, '../frontend/src', relativePath), 'utf8');
+const entrySource = readFrontend('main.js');
+const borrowPageSource = readFrontend('pages/BorrowPage.js');
+const adminSource = readFrontend('pages/AdminPage.js');
+const answersSource = readFrontend('pages/AnswersPage.js');
+const apiSource = readFrontend('services/api.js');
+const footerSource = readFrontend('composables/use-site-footer.js');
+const fireworksLoaderSource = readFrontend('services/borrow-fireworks.js');
+const dateSource = readFrontend('utils/date.js');
+// 跨页面总量/文案约束使用完整模块集合，页面归属断言直接读取对应页面。
+const source = [entrySource, borrowPageSource, answersSource, adminSource, apiSource, footerSource, fireworksLoaderSource, dateSource].join('\n');
 const documentSource = fs.readFileSync(
   path.resolve(__dirname, '../frontend/index.html'),
   'utf8'
@@ -18,10 +25,28 @@ const motionConfigSource = fs.readFileSync(path.resolve(__dirname, '../frontend/
 const presentationSource = fs.readFileSync(path.resolve(__dirname, '../frontend/src/composables/use-device-presentation.js'), 'utf8');
 const borrowCartSource = fs.readFileSync(path.resolve(__dirname, '../frontend/src/composables/use-borrow-cart.js'), 'utf8');
 
-const borrowPageSource = source.slice(
-  source.indexOf('const BorrowPage'),
-  source.indexOf('const AdminPage')
-);
+test('pages share transport, footer and date tools without sharing business state', () => {
+  for (const page of [borrowPageSource, adminSource]) {
+    assert.match(page, /import \{ apiCall \} from '\.\.\/services\/api\.js'/);
+    assert.match(page, /import \{ useSiteFooter \} from '\.\.\/composables\/use-site-footer\.js'/);
+    assert.match(page, /import \{ formatDate \} from '\.\.\/utils\/date\.js'/);
+    assert.match(page, /setup\(\)\s*\{\s*const \{ siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping \} = useSiteFooter\(\)/);
+    assert.doesNotMatch(page, /(?:async )?function apiCall\(|function formatDate\(/);
+  }
+  assert.match(footerSource, /export function useSiteFooter\(\)/);
+  assert.doesNotMatch(footerSource, /localStorage|borrowCart|\/api\//);
+  assert.match(dateSource, /if \(!iso\) return '-'/);
+  assert.match(dateSource, /d\.getFullYear\(\)/);
+  assert.match(dateSource, /d\.getHours\(\)/);
+});
+
+test('answer page keeps the shared answer source and preloads its paired font only on mount', () => {
+  assert.match(answersSource, /import ANSWER_BOOK_RESPONSES from '\.\.\/content\/answer-book-responses\.json'/);
+  assert.match(answersSource, /import \{ preloadAnswerFont \} from '\.\.\/composables\/use-answer-font\.js'/);
+  assert.match(answersSource, /Vue\.onMounted\([\s\S]*?preloadAnswerFont\(\)/);
+  assert.doesNotMatch([entrySource, borrowPageSource, adminSource].join('\n'), /preloadAnswerFont/);
+});
+
 
 test('unified portal uses the public available list and shared device-status detail', () => {
   assert.match(borrowPageSource, /\/api\/devices\/available/);
@@ -41,9 +66,9 @@ test('administrator UI exposes archive lifecycle actions', () => {
 });
 
 test('administrator history views retain complete borrower details', () => {
-  const historySource = source.slice(
-    source.indexOf('<!-- 全部记录 -->'),
-    source.indexOf('<!-- 添加/编辑设备弹窗 -->')
+  const historySource = adminSource.slice(
+    adminSource.indexOf('<!-- 全部记录 -->'),
+    adminSource.indexOf('<!-- 添加/编辑设备弹窗 -->')
   );
 
   assert.match(historySource, /rec\.borrowerId/);
@@ -91,17 +116,13 @@ test('successful returns expose an answers-book action and the standalone route'
   assert.match(borrowPageSource, /showActionFeedback\('设备已归舱',[\s\S]*答案之书/);
   assert.match(borrowPageSource, /actionFeedback\.action/);
   assert.match(borrowPageSource, /href: '\/answers'/);
-  assert.match(source, /const AnswersPage = \{/);
-  assert.match(source, /const isAnswersPage = path === '\/answers'/);
-  assert.match(source, /<AnswersPage v-else-if="isAnswers" \/>/);
+  assert.match(answersSource, /const AnswersPage = \{/);
+  assert.match(entrySource, /const isAnswersPage = path === '\/answers'/);
+  assert.match(entrySource, /<AnswersPage v-else-if="isAnswers" \/>/);
 });
 
 // 答案页契约：本地答案池支持首次抽取、再抽一次和返回借还页。
 test('answers book supports drawing another local answer without an API', () => {
-  const answersSource = source.slice(
-    source.indexOf('const AnswersPage'),
-    source.indexOf('// ==================== 管理后台组件')
-  );
   assert.match(answersSource, /答案之书/);
   assert.match(answersSource, /drawAnswer/);
   assert.match(answersSource, /再抽一次/);
@@ -111,10 +132,6 @@ test('answers book supports drawing another local answer without an API', () => 
 
 // 参考站点视觉契约：初始页、翻书态和结果态使用相同的核心文案与操作。
 test('answers book mirrors the reference page copy and interaction states', () => {
-  const answersSource = source.slice(
-    source.indexOf('const AnswersPage'),
-    source.indexOf('// ==================== 管理后台组件')
-  );
   assert.match(answersSource, /<span>答案之书<\/span>/);
   assert.match(answersSource, /在犹豫不决时，找到内心的答案/);
   assert.match(answersSource, /在心中思考一个问题，点击答案之书探索可能的答案/);
@@ -129,10 +146,6 @@ test('answers book mirrors the reference page copy and interaction states', () =
 
 // 答案页回归契约：长答案不能溢出结果区，再抽一次回到答案首页。
 test('answers result fits the stage and retry returns to the home page', () => {
-  const answersSource = source.slice(
-    source.indexOf('const AnswersPage'),
-    source.indexOf('// ==================== 管理后台组件')
-  );
   assert.match(answersSource, /<a href="\/answers" class="answers-retry-button">再抽一次<\/a>/);
   assert.doesNotMatch(answersSource, /class="answers-retry-button"[^>]*@click="drawAnswer"/);
   assert.match(documentSource, /\.answers-result__quote \{[^}]*max-width: min\(100%, 960px\);[^}]*white-space: normal;/);
@@ -140,20 +153,12 @@ test('answers result fits the stage and retry returns to the home page', () => {
 
 // 答案页导航契约：右上角始终保留返回借还页面的文字入口。
 test('answers page exposes an upper-right return-to-borrow link', () => {
-  const answersSource = source.slice(
-    source.indexOf('const AnswersPage'),
-    source.indexOf('// ==================== 管理后台组件')
-  );
   assert.match(answersSource, /<a href="\/borrow" class="answers-back-link">返回借还<\/a>/);
   assert.match(documentSource, /\.answers-back-link\s*\{[^}]*position:\s*absolute;[^}]*top:[^}]*right:/s);
 });
 
 // 答案页背景契约：根滚动条槽位也必须保持白色，不能露出借还页的米白底色。
 test('answers page keeps the full viewport white around the stable scrollbar gutter', () => {
-  const answersSource = source.slice(
-    source.indexOf('const AnswersPage'),
-    source.indexOf('// ==================== 管理后台组件')
-  );
   assert.match(answersSource, /document\.documentElement\.classList\.add\('answers-route'\)/);
   assert.match(documentSource, /html\.answers-route,\s*body\.answers-route\s*\{[^}]*background:\s*#fff;[^}]*background-image:\s*none;/s);
 });
@@ -306,7 +311,7 @@ test('available devices render as a responsive waterfall using optimized thumbna
   assert.match(presentationSource, /aspectRatio: imageDisplayAspectRatio\(item\)/);
   assert.match(motionCardSource, /const imageSource = view\.imageSource/);
   assert.match(borrowPageSource, /handleCardImageLoad/);
-  assert.match(source, /import \{ useDevicePresentation \} from ['"]\.\/composables\/use-device-presentation\.js['"]/);
+  assert.match(borrowPageSource, /import \{ useDevicePresentation \} from ['"]\.\.\/composables\/use-device-presentation\.js['"]/);
   assert.match(borrowPageSource, /const devicePresentation = useDevicePresentation\(categories\)/);
   assert.match(borrowPageSource, /\.\.\.devicePresentation/);
   assert.match(motionCardSource, /props\.entry\.index < 2 \? 'eager' : 'lazy'/);
@@ -361,9 +366,9 @@ test('administrator UI exposes active-record edit and force-return actions', () 
 });
 
 test('offline confirmation happens before the optional reason prompt', () => {
-  const toggleSource = source.slice(
-    source.indexOf('async function toggleOperationalStatus'),
-    source.indexOf('async function generatePortalQR')
+  const toggleSource = adminSource.slice(
+    adminSource.indexOf('async function toggleOperationalStatus'),
+    adminSource.indexOf('async function generatePortalQR')
   );
   assert.ok(toggleSource.indexOf('confirm(`确定将') < toggleSource.indexOf('prompt('));
 });
@@ -816,12 +821,11 @@ test('document includes prefers-reduced-motion override', () => {
 test('borrow portal loads and isolates the click particle effect', () => {
   const fireworks = fs.readFileSync(path.resolve(__dirname, '../public/js/fireworks.js'), 'utf8');
   const anime = fs.readFileSync(path.resolve(__dirname, '../public/js/anime.min.js'), 'utf8');
-  const borrowPageSource = source.slice(source.indexOf('const BorrowPage'), source.indexOf('const AdminPage'));
 
   assert.ok(anime.length > 1000);
   assert.match(borrowPageSource, /<canvas class="fireworks" aria-hidden="true"><\/canvas>/);
   assert.match(borrowPageSource, /loadBorrowFireworks\(canvasEl\)/);
-  assert.match(source, /loadScript\('\/js\/anime\.min\.js'\)[\s\S]*?loadScript\('\/js\/fireworks\.js'\)/);
+  assert.match(fireworksLoaderSource, /loadScript\('\/js\/anime\.min\.js'\)[\s\S]*?loadScript\('\/js\/fireworks\.js'\)/);
   assert.match(fireworks, /window\.initBorrowFireworks/);
   assert.match(fireworks, /prefers-reduced-motion/);
   assert.match(fireworks, /pointerdown/);
@@ -829,7 +833,7 @@ test('borrow portal loads and isolates the click particle effect', () => {
   assert.match(fireworks, /removeEventListener\('pointerdown'/);
   assert.match(fireworks, /pause\(\)/);
   assert.match(documentSource, /\.fireworks\s*\{[^}]*pointer-events:\s*none[^}]*z-index:\s*90/s);
-  assert.doesNotMatch(source.slice(source.indexOf('const AdminPage')), /class="fireworks"/);
+  assert.doesNotMatch(adminSource, /class="fireworks"/);
 });
 
 // 约束用户端与管理端吸顶导航保持统一的半透明玻璃层表现。
@@ -880,9 +884,9 @@ test('old portal-subtitle is removed from the document', () => {
 test('public and administrator footers expose the local site runtime clock', () => {
   const runtimeFooters = source.match(/class="page-footer__runtime"/g) || [];
   assert.equal(runtimeFooters.length, 2);
-  assert.match(source, /2026-07-21T12:00:00\+08:00/);
-  assert.match(source, /本站已运行 \$\{days\} 天 \$\{hours\} 小时 \$\{minutes\} 分 \$\{seconds\} 秒/);
-  assert.match(source, /window\.clearInterval\(timerId\)/);
+  assert.match(footerSource, /2026-07-21T12:00:00\+08:00/);
+  assert.match(footerSource, /本站已运行 \$\{days\} 天 \$\{hours\} 小时 \$\{minutes\} 分 \$\{seconds\} 秒/);
+  assert.match(footerSource, /window\.clearInterval\(timerId\)/);
 
   const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
   assert.match(document, /\.page-footer__runtime\s*\{/);
@@ -892,12 +896,12 @@ test('public and administrator footers expose the local site runtime clock', () 
 test('public and administrator footers load one hitokoto sentence per refresh', () => {
   const hitokotoFooters = source.match(/class="page-footer__hitokoto"/g) || [];
   assert.equal(hitokotoFooters.length, 2);
-  assert.match(source, /https:\/\/v1\.hitokoto\.cn\/\?c=i&c=k&max_length=40&encode=json/);
-  assert.match(source, /Vue\.onMounted\(loadHitokoto\)/);
-  assert.match(source, /AbortController/);
-  assert.match(source, /window\.setTimeout\([\s\S]*?2500/);
-  assert.match(source, /山高水长，行稳致远。/);
-  assert.match(source, /https:\/\/hitokoto\.cn\/\?uuid=/);
+  assert.match(footerSource, /https:\/\/v1\.hitokoto\.cn\/\?c=i&c=k&max_length=40&encode=json/);
+  assert.match(footerSource, /Vue\.onMounted\(loadHitokoto\)/);
+  assert.match(footerSource, /AbortController/);
+  assert.match(footerSource, /window\.setTimeout\([\s\S]*?2500/);
+  assert.match(footerSource, /山高水长，行稳致远。/);
+  assert.match(footerSource, /https:\/\/hitokoto\.cn\/\?uuid=/);
   assert.match(source, /rel="noopener noreferrer"/);
 
   const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
@@ -910,13 +914,13 @@ test('public and administrator footers load one hitokoto sentence per refresh', 
 test('hitokoto footer uses an accessible reduced-motion-aware typewriter effect', () => {
   const cursors = source.match(/class="page-footer__hitokoto-cursor"/g) || [];
   assert.equal(cursors.length, 2);
-  assert.match(source, /Array\.from\(text\)/);
-  assert.match(source, /window\.setInterval\([\s\S]*?60/);
-  assert.match(source, /window\.setTimeout\([\s\S]*?1000/);
-  assert.match(source, /useReducedMotion\(\)/);
-  assert.match(source, /window\.clearInterval\(typingTimerId\)/);
-  assert.match(source, /window\.clearTimeout\(cursorTimerId\)/);
-  assert.match(source, /isHitokotoTyping/);
+  assert.match(footerSource, /Array\.from\(text\)/);
+  assert.match(footerSource, /window\.setInterval\([\s\S]*?60/);
+  assert.match(footerSource, /window\.setTimeout\([\s\S]*?1000/);
+  assert.match(footerSource, /useReducedMotion\(\)/);
+  assert.match(footerSource, /window\.clearInterval\(typingTimerId\)/);
+  assert.match(footerSource, /window\.clearTimeout\(cursorTimerId\)/);
+  assert.match(footerSource, /isHitokotoTyping/);
 
   const document = fs.readFileSync(path.resolve(__dirname, '../frontend/index.html'), 'utf8');
   assert.match(document, /\.page-footer__hitokoto-cursor\s*\{/);
@@ -957,12 +961,11 @@ test('borrow portal uses Motion for Vue for entry, gesture, scroll, and feedback
   assert.doesNotMatch(borrowPageSource, /<\/?motion\./);
   assert.match(borrowPageSource, /<AnimatePresence(?:\s[^>]*)?>/);
   assert.match(borrowPageSource, /useReducedMotion/);
-  assert.doesNotMatch(source.slice(source.indexOf('const AdminPage')), /motion\./);
+  assert.doesNotMatch(adminSource, /motion\./);
 });
 
 // 管理端 Tab 与弹窗应使用可进出场的 Vue 动效，并复用减少动态效果状态。
 test('administrator uses transition wrappers for tabs and modal surfaces', () => {
-  const adminSource = source.slice(source.indexOf('const AdminPage'));
   assert.match(adminSource, /<transition[^>]+name="admin-tab"/);
   assert.match(adminSource, /<transition[^>]+name="admin-modal"/);
   assert.match(adminSource, /prefersReducedMotion/);
@@ -972,7 +975,6 @@ test('administrator uses transition wrappers for tabs and modal surfaces', () =>
 
 // 管理端移动导航和设备编辑层应有独立进出场过渡。
 test('administrator drawer and device editor use transition wrappers', () => {
-  const adminSource = source.slice(source.indexOf('const AdminPage'));
   assert.match(adminSource, /<transition[^>]+name="admin-drawer"/);
   assert.match(adminSource, /<transition[^>]+name="admin-device-modal"/);
   assert.match(documentSource, /\.admin-drawer-enter/);
@@ -992,7 +994,7 @@ test('borrow actions use the requested hover and spring press gesture values', (
 
 // TSX 组件契约：用户端设备卡片独立使用 Vue JSX，滚动思路借鉴示例但不绑定相同视觉参数。
 test('borrow portal renders device cards through a Vue TSX Motion component', () => {
-  assert.match(source, /import MotionDeviceCard from ['"]\.\/components\/MotionDeviceCard\.tsx['"]/);
+  assert.match(borrowPageSource, /import MotionDeviceCard from ['"]\.\.\/components\/MotionDeviceCard\.tsx['"]/);
   assert.match(borrowPageSource, /<MotionDeviceCard[\s\S]*:entry="entry"/);
   assert.match(borrowPageSource, /:in-cart="isInCart\(entry\.item\.id\)"/);
   assert.match(motionCardSource, /defineComponent/);
@@ -1063,7 +1065,6 @@ test('portal return page supports batch return with a shared note', () => {
 
 // 管理员批量归还契约：勾选当前借出记录统一备注强制归还，后端只写一条汇总日志。
 test('administrator supports batch force-return of active records', () => {
-  const adminSource = source.slice(source.indexOf('const AdminPage'));
   assert.match(adminSource, /\/api\/records\/force-return-batch/);
   assert.match(adminSource, /selectedActiveRecordIds/);
   assert.match(adminSource, /openBatchForceReturn/);

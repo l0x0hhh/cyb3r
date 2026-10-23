@@ -1,3 +1,4 @@
+// 构建与装配契约：页面独立导入，继续使用 Vue 运行时模板与原路径选择。
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -116,6 +117,23 @@ test('server publishes the built frontend when dist exists', () => {
 
 test('Vite bundles the compiler-enabled Vue build used by inline templates', () => {
   assert.match(viteSource, /vue\.esm-bundler\.js/);
+});
+
+test('frontend entry assembles standalone runtime-template pages with the existing routes', () => {
+  const readSource = relativePath => fs.readFileSync(path.join(projectRoot, 'frontend/src', relativePath), 'utf8');
+  const entry = readSource('main.js');
+  for (const [pageName, route] of [['BorrowPage', 'borrow'], ['AdminPage', 'admin'], ['AnswersPage', 'answers']]) {
+    assert.ok(entry.includes(`import ${pageName} from './pages/${pageName}.js'`));
+    assert.ok(entry.includes(`path === '/${route}' || path === '/${route}/'`));
+    assert.ok(entry.includes(`p === '/${route}' || p === '/${route}/'`));
+    const page = readSource(`pages/${pageName}.js`);
+    assert.ok(page.includes(`const ${pageName} = {`));
+    assert.ok(page.includes('template: `'));
+    assert.ok(page.includes(`export default ${pageName};`));
+  }
+  assert.doesNotMatch(entry, /apiCall|fetch\(|useSiteFooter|const (?:BorrowPage|AdminPage|AnswersPage)\s*=/);
+  assert.match(entry, /components:\s*\{ BorrowPage, AdminPage, AnswersPage \}/);
+  assert.match(entry, /app\.mount\('#app'\)/);
 });
 
 // frontend 已作为 Vite 根目录，使用默认 index.html 可避免 Linux 上重复解析入口路径。

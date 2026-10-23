@@ -81,7 +81,11 @@
 | `server.js` | Express API、权限、校验、SQLite 数据读写、上传、二维码和页面入口 | 后端接口、数据、隐私、安全 |
 | `db/repository.js` | SQLite 初始化、JSON 首次迁移、对象字段转换、记录完整快照差异写入和事务封装 | 数据源切换、写入效率、事务、数据库故障 |
 | `email-service.js` | SMTP 连接、认证和纯文本投递 | 邮件协议或投递问题 |
-| `frontend/src/main.js` | Vue 用户门户、答案之书彩蛋、管理后台和交互状态；页面级 Motion 进入、手势、滚动和反馈动效 | 页面行为、表单、接口调用或页面级动效 |
+| `frontend/src/main.js` | 页面导入、原路径选择、根应用装配与挂载 | 入口与浏览器前进后退 |
+| `frontend/src/pages/BorrowPage.js`、`AdminPage.js`、`AnswersPage.js` | 三个页面各自的 Vue 运行时模板、状态和业务交互；保留原页面效果 | 对应页面行为、表单、接口调用或动效 |
+| `frontend/src/services/api.js` | 共用 apiCall，保持 URL、请求体、认证头和响应/错误语义 | API 传输边界 |
+| `frontend/src/services/borrow-fireworks.js` | 用户端粒子依赖顺序加载、失败静默降级与销毁函数 | 用户端特效加载 |
+| `frontend/src/composables/use-site-footer.js`、`frontend/src/utils/date.js` | 每页独立的运行时长/一言状态及共用日期格式化 | 页脚计时器、减少动态效果及时间显示 |
 | `frontend/src/components/MotionDeviceCard.tsx` | 用户端设备卡片的 Vue TSX 结构、Motion 滚动进入和图片事件转发 | 设备卡片结构、卡片入场动效或图片事件 |
 | `frontend/src/components/borrow-motion.js` | 显式 Motion 组件注册表、卡片视口动画及无观察器/减少动态效果时的静态策略 | 字符串模板动效注册或触发问题 |
 | `frontend/src/composables/use-device-presentation.js` | 分类 ID 到内置 SVG 的映射、图片加载/失败缓存、裁剪与卡片展示数据；不调用业务 API | 用户端分类图标、图片兜底或展示缓存 |
@@ -102,6 +106,8 @@
 | `miniprogram/` | 暂缓的微信小程序普通用户端 | 仅处理小程序事项时查看 |
 | `data/`、`uploads/`、`public/qrcodes/` | 本地开发持久化和资源；`data/device-management.sqlite` 为运行时业务数据库，旧 JSON 仅用于首次迁移或备份 | 不提交真实数据；部署不得覆盖数据库、JSON 备份、上传和二维码 |
 | `frontend/dist/` | Vite 生成产物 | 构建生成，不手工编辑 |
+
+页面重构交付与字体基线处理见 [`tasks/frontend-pages.md`](tasks/frontend-pages.md)。页面保留字符串运行时模板；main.js 不持有业务表单或请求实现，共享组合函数不持有个人表单。
 
 详细文件锚点、调用链和数据写入关系见 [`CODE_STRUCTURE.md`](CODE_STRUCTURE.md)。
 
@@ -127,7 +133,7 @@ SQLite 运行时：`db/schema.sql` 定义目标表结构，`db/repository.js` �
 
 | 任务 | 先读什么 | 主要验证 |
 | --- | --- | --- |
-| 新功能或修复 | `CURRENT_STATUS.md` -> 本文 -> `server.js` 或 `frontend/src/main.js` | 定向契约测试、语法检查、`npm test` |
+| 新功能或修复 | `CURRENT_STATUS.md` -> 本文 -> `server.js` 或对应 `frontend/src/pages/` 页面 | 定向契约测试、语法检查、`npm test` |
 | 样式/响应式 | `CURRENT_STATUS.md` -> 本文 -> `frontend/index.html` | 前端契约测试；浏览器由用户手动验收 |
 | 邮件通知 | 本文邮件规则 -> `email-service.js`、邮件测试 | 邮件协议/通知测试和真实 SMTP 手动验收 |
 | 图片迁移 | 本文图片规则 -> `scripts/migrate-image-variants.js` | 先 `npm run migrate:images -- --dry-run`，再确认正式命令 |
@@ -142,6 +148,7 @@ SQLite 运行时：`db/schema.sql` 定义目标表结构，`db/repository.js` �
 - 字符串模板使用 `MotionArticle`、`MotionButton`、`MotionDiv`，通过共享注册表显式注册；不直接使用 `<motion.article>` 命名空间标签。卡片以设备字段与缓存的展示数据为输入，不接收父页面图片/分类处理函数；图标 SVG 只来自内置表。
 - 卡片保持初始可见，正常模式仅在首次进入视口时播放位移；减少动态效果或缺少 IntersectionObserver 时立即归位。`test/motion-components.test.js` 用 Node 下的 Vue 服务端渲染验证原生标签与静态策略，不启动浏览器；实际滚动、键盘和手机交互仍由用户手动检查。
 - `useDevicePresentation(categories)` 为每个借还页实例维护缓存，卡片通过 WeakMap 复用 computed 展示数据；分类异步加载或图标修改时同步更新。分类 ID 先取后台配置的图标名称，再回退内置 ID 映射和 other，只输出本地图标表。`test/device-presentation.test.js` 覆盖实际响应式缓存、分类映射、空位置、裁剪优先级及缺失图片变体；本轮是否执行仅看交接卡。
+- `test/frontend-source.test.js` 按页面/工具模块读取源码，保留跨页面数量、隐私、表单与动效约束；`test/build-config.test.js` 约束页面装配和原路径选择，`test/frontend-api.test.js` 使用模拟传输约束会话、JSON、FormData、部分成功响应及异常传播。本批检查均未本地执行。
 - `useBorrowCart()` 对页面暴露只读设备摘要列表和显式修改方法，个人表单与 API 调用仍由页面持有；`test/borrow-cart.test.js` 覆盖上限、快照隔离、部分成功、清空和实例隔离。前端源码契约保留提交快照、重复提交拦截及表单清理条件，实际异步交互仍由用户人工验收。
 - verify job 仅使用 GitHub 临时运行器中的源码和测试数据，不读取生产持久化目录或部署密钥。deploy job 必须依赖 verify 成功，只接受 main push / main 手动运行且 `CD_ENABLED=true`。
 - 生产自动发布使用专用 SSH 密钥和固定 SHA 入口，准备好独立版本后切换并重启，健康检查失败尝试恢复旧代码；具体一次性配置、启用状态与风险见 [`CI_CD.md`](CI_CD.md) 及当前交接卡。文件存在不代表服务器与 GitHub 已配置成功。
