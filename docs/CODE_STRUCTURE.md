@@ -21,6 +21,7 @@
 | `frontend/src/components/MotionDeviceCard.tsx` | 用户端设备卡片的 Vue TSX 结构和图片事件转发；不承载借用业务状态 | `MotionDeviceCard`、`getDeviceCardMotionProps`、组件 emits |
 | `frontend/src/components/borrow-motion.js` | 字符串模板的显式组件注册及卡片视口/静态动效策略 | `borrowMotionComponents`、`cardVariants`、`whileInView` |
 | `frontend/src/composables/use-device-presentation.js` | 分类图标、图片状态、裁剪回退和按设备缓存的展示数据；页面只负责接入 | `useDevicePresentation`、`getDeviceCardPresentation`、`detailMediaStyle` |
+| `frontend/src/composables/use-borrow-cart.js` | 只读清单摘要、数量上限、弹窗状态和提交快照结算；页面持有表单和接口调用 | `useBorrowCart`、`snapshotBorrowCart`、`settleBatchBorrow` |
 | `frontend/index.html` | HTML 入口、全局 CSS、响应式与动画 | `/* ============ 借还页`、`答案之书彩蛋`、`弹窗 & 表单`、`管理后台`、`动画` |
 | `miniprogram/services/api.js` | 小程序统一请求、API 地址、图片地址和日期格式化 | `request`、`assetUrl` |
 | `miniprogram/pages/*` | 小程序普通用户列表、详情、借用表单、归还查询页面 | `pages/borrow`、`pages/detail`、`pages/borrow-form`、`pages/return` |
@@ -52,7 +53,7 @@ flowchart TD
 
 | 需求类型 | 首要文件 | 常用搜索锚点 | 配套验证 |
 |---|---|---|---|
-| 用户端借用流程 | `frontend/src/main.js` | `const BorrowPage`、`doBorrow` | `test/frontend-source.test.js`、`test/server.test.js` |
+| 用户端借用流程 | `frontend/src/main.js`、`frontend/src/composables/use-borrow-cart.js` | `const BorrowPage`、`doBorrow`、`doBatchBorrow`、`settleBatchBorrow` | `test/frontend-source.test.js`、`test/borrow-cart.test.js`、`test/server.test.js` |
 | 用户端归还流程 | `frontend/src/main.js`、`server.js` | `lookupReturns`、`doReturn`、`return-lookup` | 同上 |
 | 管理员邮件通知 | `server.js`、`email-service.js`、`frontend/src/main.js` | `normalizeEmailSettings`、`queueEmailNotification`、`sendSmtpMail`、`email-notifications` | `test/email-service.test.js`、`test/email-notification.test.js`、`test/server.test.js` |
 | 搜索、分类筛选、设备卡片 | `frontend/src/main.js`、`frontend/src/components/MotionDeviceCard.tsx`、`frontend/src/composables/use-device-presentation.js` | `portal-chips`、`filteredDevices`、`MotionDeviceCard`、`categoryIcon` | `test/frontend-source.test.js`、`test/device-presentation.test.js` + 用户手动浏览器检查 |
@@ -89,6 +90,7 @@ flowchart TD
 │  ├─ src/components/MotionDeviceCard.tsx # 用户端设备卡片的 Vue TSX Motion 组件
 │  ├─ src/components/borrow-motion.js # 字符串模板组件注册与卡片动画策略（@ts-check）
 │  ├─ src/composables/use-device-presentation.js # 分类/图片展示状态及卡片缓存（@ts-check）
+│  ├─ src/composables/use-borrow-cart.js # 借用清单、数量上限和提交快照结算（@ts-check）
 │  ├─ src/types/device.ts            # 设备/展示数据/图片事件类型
 │  └─ dist/                          # 构建产物，禁止手工修改
 ├─ miniprogram/                      # 原生微信小程序普通用户端（独立导入开发者工具）
@@ -114,6 +116,7 @@ flowchart TD
 │  ├─ frontend-source.test.js        # 前端源码契约
 │  ├─ motion-components.test.js      # Node SSR 原生元素与视口/静态策略回归
 │  ├─ device-presentation.test.js     # 分类映射、图片状态、裁剪兜底和响应式缓存回归
+│  ├─ borrow-cart.test.js             # 清单上限、快照、部分成功与实例隔离回归
 │  ├─ security-config.test.js        # 安全与生产配置
 │  ├─ build-config.test.js           # 构建、依赖、静态资源
 │  ├─ ci-workflow.test.js            # CI/CD 触发边界、提交及主机校验
@@ -417,6 +420,7 @@ npm run build
 
 - 前端类型门禁：`npm run typecheck`，覆盖 TS/TSX、组合函数目录和导入的显式 `@ts-check` 动效模块；并非全应用 JS 类型检查。
 - 字符串模板通过 `borrowMotionComponents` 注册 `MotionArticle/Button/Div`；TSX 卡片接收 `DeviceCardPresentation`，独立的 `useDevicePresentation` 按设备缓存展示计算，不传父页面回调函数。该组合函数只处理分类与图片展示，不获取数据或修改借还业务状态。
+- 清单只由 `useBorrowCart` 的方法修改，页面通过设备快照提交，并按服务端确认的 ID 结算；失败不清空清单，部分成功与请求期间新增项保留。页面同时保存表单快照，仅在清单处理完且表单未改填时重置，组合函数不接收个人表单或网络回调。
 - Vite 源入口：`frontend/index.html`。
 - Vite 产物：`frontend/dist/`，由 `npm run build` 生成。
 - systemd 服务：`device-management`，工作目录 `/opt/device-management`。

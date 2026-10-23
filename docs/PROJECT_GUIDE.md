@@ -20,6 +20,7 @@
 
 - 公共列表只展示 `online + available` 设备；借用时必填姓名、11 位手机号、专业和用途，学号/工号可选。
 - 支持批量借用：用户可将多台设备加入借用清单（最多 10 台），共用一份借用信息一次提交；后端 `POST /api/records/borrow-batch` 逐个校验设备存在、在线且未借出，单台冲突不影响其他设备借出，部分成功返回成功与冲突列表，每台成功记录独立写入，批量只发一封汇总邮件。
+- 借用清单仅保存设备编号、名称和型号，各页面实例隔离；批量提交使用设备及表单快照，只移除本次请求中服务端确认借出的设备，失败条目和提交期间新增选择保留。清单全部处理完且表单未被改填时才清空表单；单台借用成功同步移除对应清单项。清空或移除最后一项时关闭清单面板与批量弹窗。
 - 支持借用未录入库存的设备：用户填写设备名称后调用 `POST /api/records/borrow-other`，仍写入普通借用记录并进入管理员当前借出列表，不创建或修改库存设备；记录标记 `isOtherDevice`，后续可正常用户归还或管理员强制归还。
 - 支持批量归还：用户查询待归还设备后可勾选多台，统一备注一次归还（备注不同请各自单独归还），凭证覆盖所选记录；管理员可在当前借出列表勾选多台批量强制归还（`POST /api/records/return-batch` / `force-return-batch`），只写一条汇总操作日志。
 - 后端必须再次校验设备存在、在线且未借出，不能只依赖前端状态。
@@ -82,7 +83,8 @@
 | `frontend/src/components/MotionDeviceCard.tsx` | 用户端设备卡片的 Vue TSX 结构、Motion 滚动进入和图片事件转发 | 设备卡片结构、卡片入场动效或图片事件 |
 | `frontend/src/components/borrow-motion.js` | 显式 Motion 组件注册表、卡片视口动画及无观察器/减少动态效果时的静态策略 | 字符串模板动效注册或触发问题 |
 | `frontend/src/composables/use-device-presentation.js` | 分类 ID 到内置 SVG 的映射、图片加载/失败缓存、裁剪与卡片展示数据；不调用业务 API | 用户端分类图标、图片兜底或展示缓存 |
-| `frontend/src/types/device.ts` | 共享图片字段、分类、卡片设备与展示数据及图片事件的类型契约 | 展示数据边界或事件类型 |
+| `frontend/src/composables/use-borrow-cart.js` | 清单增删、10 台上限、面板/弹窗开关、提交快照和成功设备移除；不调用 API 或存储个人信息 | 借用清单、部分成功或异步提交期间的选择 |
+| `frontend/src/types/device.ts` | 共享图片字段、分类、卡片展示、清单摘要及图片事件的类型契约 | 展示/清单数据边界或事件类型 |
 | `frontend/index.html` | HTML 入口、用户端/答案之书/管理端全局响应式样式 | 布局、视觉、移动端样式、用户端粒子层样式 |
 | `public/js/anime.min.js` | Anime.js 2.2.0 静态动画依赖 | 用户端点击粒子特效按需加载 |
 | `public/js/fireworks.js` | 用户端 Canvas 粒子和圆环动画 | `/borrow` 点击特效、交互过滤和卸载清理 |
@@ -133,6 +135,7 @@ SQLite 运行时：`db/schema.sql` 定义目标表结构，`db/repository.js` �
 - 字符串模板使用 `MotionArticle`、`MotionButton`、`MotionDiv`，通过共享注册表显式注册；不直接使用 `<motion.article>` 命名空间标签。卡片以设备字段与缓存的展示数据为输入，不接收父页面图片/分类处理函数；图标 SVG 只来自内置表。
 - 卡片保持初始可见，正常模式仅在首次进入视口时播放位移；减少动态效果或缺少 IntersectionObserver 时立即归位。`test/motion-components.test.js` 用 Node 下的 Vue 服务端渲染验证原生标签与静态策略，不启动浏览器；实际滚动、键盘和手机交互仍由用户手动检查。
 - `useDevicePresentation(categories)` 为每个借还页实例维护缓存，卡片通过 WeakMap 复用 computed 展示数据；分类异步加载或图标修改时同步更新。分类 ID 先取后台配置的图标名称，再回退内置 ID 映射和 other，只输出本地图标表。`test/device-presentation.test.js` 覆盖实际响应式缓存、分类映射、空位置、裁剪优先级及缺失图片变体；本轮是否执行仅看交接卡。
+- `useBorrowCart()` 对页面暴露只读设备摘要列表和显式修改方法，个人表单与 API 调用仍由页面持有；`test/borrow-cart.test.js` 覆盖上限、快照隔离、部分成功、清空和实例隔离。前端源码契约保留提交快照、重复提交拦截及表单清理条件，实际异步交互仍由用户人工验收。
 - verify job 仅使用 GitHub 临时运行器中的源码和测试数据，不读取生产持久化目录或部署密钥。deploy job 必须依赖 verify 成功，只接受 main push / main 手动运行且 `CD_ENABLED=true`。
 - 生产自动发布使用专用 SSH 密钥和固定 SHA 入口，准备好独立版本后切换并重启，健康检查失败尝试恢复旧代码；具体一次性配置、启用状态与风险见 [`CI_CD.md`](CI_CD.md) 及当前交接卡。文件存在不代表服务器与 GitHub 已配置成功。
 

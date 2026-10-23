@@ -1,4 +1,4 @@
-// 前端职责契约：页面接入独立展示组合函数，卡片与图片裁剪仍保留模板和样式约束。
+// 前端职责契约：独立展示与借用清单接回页面，失败结果不得清空清单或个人表单。
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -16,6 +16,7 @@ const motionCardPath = path.resolve(__dirname, '../frontend/src/components/Motio
 const motionCardSource = fs.existsSync(motionCardPath) ? fs.readFileSync(motionCardPath, 'utf8') : '';
 const motionConfigSource = fs.readFileSync(path.resolve(__dirname, '../frontend/src/components/borrow-motion.js'), 'utf8');
 const presentationSource = fs.readFileSync(path.resolve(__dirname, '../frontend/src/composables/use-device-presentation.js'), 'utf8');
+const borrowCartSource = fs.readFileSync(path.resolve(__dirname, '../frontend/src/composables/use-borrow-cart.js'), 'utf8');
 
 const borrowPageSource = source.slice(
   source.indexOf('const BorrowPage'),
@@ -1015,7 +1016,8 @@ test('portal supports batch borrowing with a shared borrow cart', () => {
   assert.match(borrowPageSource, /borrowCart/);
   assert.match(borrowPageSource, /加入借用/);
   assert.match(borrowPageSource, /统一填写信息并借用/);
-  assert.match(borrowPageSource, /MAX_BATCH_BORROW\s*=\s*10/);
+  assert.match(borrowCartSource, /MAX_BATCH_BORROW\s*=\s*10/);
+  assert.match(borrowPageSource, /const borrowCartState = useBorrowCart\(\)/);
 
   // setup 的 return 必须暴露批量借用状态与函数，否则模板渲染报错导致白屏。
   const setupReturn = borrowPageSource.slice(borrowPageSource.indexOf('return {'));
@@ -1025,6 +1027,21 @@ test('portal supports batch borrowing with a shared borrow cart', () => {
   assert.match(document, /\.portal-cart\s*\{/);
   assert.match(document, /\.portal-device-row__cart\s*\{/);
   assert.match(document, /\.portal-batch-chip\s*\{/);
+});
+
+test('batch borrow submits a snapshot and retains unsuccessful selections and edited form data', () => {
+  const batchSource = borrowPageSource.slice(
+    borrowPageSource.indexOf('async function doBatchBorrow()'),
+    borrowPageSource.indexOf('async function doBorrow()')
+  );
+  assert.match(batchSource, /if \(submitting\.value \|\| !borrowCart\.length\) return/);
+  assert.match(batchSource, /snapshotBorrowCart\(\)\.map/);
+  assert.match(batchSource, /deviceIds: submittedDeviceIds/);
+  assert.match(batchSource, /if \(res\.success\)\s*\{[\s\S]*?settleBatchBorrow\(submittedDeviceIds, borrowedDeviceIds\)/);
+  assert.match(batchSource, /const submittedForm = \{ \.\.\.form \}/);
+  assert.match(batchSource, /form\[field\] === submittedForm\[field\]/);
+  assert.match(batchSource, /if \(!borrowCart\.length && formUnchanged\) resetBorrowForm\(\)/);
+  assert.doesNotMatch(batchSource, /clearBorrowCart\(\)/);
 });
 
 // 用户批量归还契约：勾选多台 + 统一备注一次归还，并保留单台各自备注归还。

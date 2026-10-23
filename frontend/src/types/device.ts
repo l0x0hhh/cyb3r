@@ -1,4 +1,4 @@
-// 用户端展示契约：图片字段供列表、详情和归还复用，卡片与分类保留明确的数据边界。
+// 用户端数据契约：共享图片展示字段，借用清单只保存设备摘要，不保存借用人信息。
 export interface DeviceImageFields {
   image?: string | null;
   imageThumb?: string | null;
@@ -23,6 +23,12 @@ export interface DeviceCategory {
   id: string;
   name: string;
   icon?: string | null;
+}
+
+export interface BorrowCartItem {
+  id: string;
+  name: string;
+  model: string;
 }
 
 export interface DeviceCardEntry {

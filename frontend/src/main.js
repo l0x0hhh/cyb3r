@@ -1,9 +1,10 @@
-// 前端职责整理：页面保留借还业务，分类与图片展示状态交由独立组合函数维护。
+// 前端职责整理：展示与清单独立维护，反馈定位与动画分层，批量提交保留未成功条目和改填表单。
 import * as Vue from 'vue';
 import { useReducedMotion } from 'motion-v';
 import { borrowMotionComponents } from './components/borrow-motion.js';
 import MotionDeviceCard from './components/MotionDeviceCard.tsx';
 import { useDevicePresentation } from './composables/use-device-presentation.js';
+import { useBorrowCart } from './composables/use-borrow-cart.js';
 const { createApp } = Vue;
 
 // 用户端点击特效按需加载，管理员后台不创建 Canvas 也不请求特效脚本。
@@ -421,22 +422,24 @@ const BorrowPage = {
         </section>
       </main>
 
-      <!-- 借还结果使用 Motion 处理进出场，短暂展示后自动消失并允许手动关闭。 -->
-      <AnimatePresence>
-        <MotionDiv v-if="actionFeedback" class="portal-feedback" :class="'portal-feedback--' + actionFeedback.type" role="status" aria-live="polite"
-          :initial="prefersReducedMotion ? false : { opacity: 0, y: -12 }"
-          :animate="prefersReducedMotion ? {} : { opacity: 1, y: 0 }"
-          :exit="prefersReducedMotion ? {} : { opacity: 0, y: -8 }"
-          :transition="{ duration: 0.18, ease: 'easeOut' }">
-          <span class="portal-feedback__mark" aria-hidden="true">{{ actionFeedback.type === 'success' ? '✓' : actionFeedback.type === 'warning' ? '!' : '×' }}</span>
-          <span class="portal-feedback__copy">
-            <strong>{{ actionFeedback.title }}</strong>
-            <small v-if="actionFeedback.detail">{{ actionFeedback.detail }}</small>
-          </span>
-          <a v-if="actionFeedback.action" class="portal-feedback__action" :href="actionFeedback.action.href">{{ actionFeedback.action.label }}</a>
-          <button class="portal-feedback__close" type="button" aria-label="关闭提示" @click="clearActionFeedback">×</button>
-        </MotionDiv>
-      </AnimatePresence>
+      <!-- 外层固定水平居中，内层 Motion 只负责进出场，避免覆盖定位 transform。 -->
+      <div class="portal-feedback-host">
+        <AnimatePresence>
+          <MotionDiv v-if="actionFeedback" class="portal-feedback" :class="'portal-feedback--' + actionFeedback.type" role="status" aria-live="polite"
+            :initial="prefersReducedMotion ? false : { opacity: 0, y: -12 }"
+            :animate="prefersReducedMotion ? {} : { opacity: 1, y: 0 }"
+            :exit="prefersReducedMotion ? {} : { opacity: 0, y: -8 }"
+            :transition="{ duration: 0.18, ease: 'easeOut' }">
+            <span class="portal-feedback__mark" aria-hidden="true">{{ actionFeedback.type === 'success' ? '✓' : actionFeedback.type === 'warning' ? '!' : '×' }}</span>
+            <span class="portal-feedback__copy">
+              <strong>{{ actionFeedback.title }}</strong>
+              <small v-if="actionFeedback.detail">{{ actionFeedback.detail }}</small>
+            </span>
+            <a v-if="actionFeedback.action" class="portal-feedback__action" :href="actionFeedback.action.href">{{ actionFeedback.action.label }}</a>
+            <button class="portal-feedback__close" type="button" aria-label="关闭提示" @click="clearActionFeedback">×</button>
+          </MotionDiv>
+        </AnimatePresence>
+      </div>
 
       <div v-if="showBorrowForm && device" class="modal-overlay" @click.self="showBorrowForm = false">
         <div class="modal">
@@ -653,11 +656,12 @@ const BorrowPage = {
       otherDeviceName: '', borrowerName: '', borrowerId: '', borrowerPhone: '', major: '', purpose: ''
     });
     const returnLookup = Vue.reactive({ borrowerName: '', borrowerPhone: '' });
-    // 批量借用清单：最多 10 台，借用信息只需填写一次。
-    const MAX_BATCH_BORROW = 10;
-    const borrowCart = Vue.reactive([]);
-    const showBorrowCart = Vue.ref(false);
-    const showBatchBorrowForm = Vue.ref(false);
+    // 清单只管理设备摘要与开关，借用人表单和接口调用仍由页面负责。
+    const borrowCartState = useBorrowCart();
+    const {
+      MAX_BATCH_BORROW, borrowCart, showBorrowCart, showBatchBorrowForm,
+      isInCart, clearBorrowCart, openBatchBorrowForm
+    } = borrowCartState;
     // 借还成功提示只保存在当前页面，并在组件卸载时清理自动消失计时器。
     const actionFeedback = Vue.ref(null);
     let feedbackTimerId = null;
@@ -675,33 +679,10 @@ const BorrowPage = {
       feedbackTimerId = window.setTimeout(clearActionFeedback, 4200);
     }
 
-    function isInCart(deviceId) {
-      return borrowCart.some(item => item.id === deviceId);
-    }
-
     function toggleCartDevice(device) {
-      const index = borrowCart.findIndex(item => item.id === device.id);
-      if (index >= 0) {
-        borrowCart.splice(index, 1);
-        return;
-      }
-      if (borrowCart.length >= MAX_BATCH_BORROW) {
+      if (borrowCartState.toggleCartDevice(device) === 'limit') {
         alert('单次最多批量借用 ' + MAX_BATCH_BORROW + ' 台设备');
-        return;
       }
-      borrowCart.push({ id: device.id, name: device.name, model: device.model || '' });
-    }
-
-    function clearBorrowCart() {
-      borrowCart.splice(0, borrowCart.length);
-      showBorrowCart.value = false;
-      showBatchBorrowForm.value = false;
-    }
-
-    function openBatchBorrowForm() {
-      if (!borrowCart.length) return;
-      showBorrowCart.value = false;
-      showBatchBorrowForm.value = true;
     }
 
     function deviceStatusText(item) {
@@ -815,20 +796,27 @@ const BorrowPage = {
     }
 
     async function doBatchBorrow() {
-      if (!borrowCart.length) return;
+      if (submitting.value || !borrowCart.length) return;
       if (!form.borrowerName || !/^1\d{10}$/.test(form.borrowerPhone) || !form.major || !form.purpose) {
         alert('请完整填写姓名、11 位手机号、专业和用途');
         return;
       }
+      const submittedDeviceIds = borrowCartState.snapshotBorrowCart().map(item => item.id);
+      const submittedForm = { ...form };
       submitting.value = true;
       try {
         const res = await apiCall('POST', '/api/records/borrow-batch', {
-          deviceIds: borrowCart.map(item => item.id),
-          ...form
+          deviceIds: submittedDeviceIds,
+          ...submittedForm
         });
         const borrowedCount = res.data?.borrowed?.length || 0;
         const conflictNames = (res.data?.conflicts || []).map(item => item.deviceName).filter(Boolean);
         if (res.success) {
+          // 部分失败或请求期间新加的设备保留；只在清单全部处理完后清空个人表单。
+          const borrowedDeviceIds = (res.data?.borrowed || []).map(item => item.deviceId);
+          borrowCartState.settleBatchBorrow(submittedDeviceIds, borrowedDeviceIds);
+          const formUnchanged = Object.keys(submittedForm).every(field => form[field] === submittedForm[field]);
+          if (!borrowCart.length && formUnchanged) resetBorrowForm();
           showActionFeedback(
             borrowedCount + ' 台设备已出舱',
             conflictNames.length ? '暂时无法借用：' + conflictNames.join('、') : '请按约定时间归还设备。',
@@ -837,8 +825,6 @@ const BorrowPage = {
         } else {
           showActionFeedback('批量借用暂未完成', conflictNames.length ? '无法借用：' + conflictNames.join('、') : (res.message || '请稍后重试'), 'error');
         }
-        clearBorrowCart();
-        resetBorrowForm();
         if (selectedDeviceId.value) await loadDevice(selectedDeviceId.value);
         await loadAvailableDevices();
       } catch (e) {
@@ -849,6 +835,8 @@ const BorrowPage = {
     }
 
     async function doBorrow() {
+      const submittedDeviceId = device.value?.id;
+      if (submitting.value || !submittedDeviceId) return;
       if (!form.borrowerName || !/^1\d{10}$/.test(form.borrowerPhone) || !form.major || !form.purpose) {
         alert('请完整填写姓名、11 位手机号、专业和用途');
         return;
@@ -856,10 +844,11 @@ const BorrowPage = {
       submitting.value = true;
       try {
         const res = await apiCall('POST', '/api/records/borrow', {
-          deviceId: device.value.id,
+          deviceId: submittedDeviceId,
           ...form
         });
         if (res.success) {
+          borrowCartState.removeCartDevices([submittedDeviceId]);
           showBorrowForm.value = false;
           resetBorrowForm();
           showActionFeedback('设备已出舱', '请按约定时间归还设备。');

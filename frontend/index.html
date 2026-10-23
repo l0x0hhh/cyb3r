@@ -1,4 +1,4 @@
-<!-- 本地化 Noto Sans SC 字体并保留图片选区的响应式比例展示。 -->
+<!-- 借还提示由外层固定居中、内层播放动效，保留本地字体与响应式图片展示。 -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -458,7 +458,9 @@
   .portal-cart__panel .btn { margin-top: 4px; }
 
   /* 借还结果提示固定在顶部导航下方，避免和底部批量借用清单争夺空间。 */
-  .portal-feedback { position: fixed; top: 78px; left: 50%; z-index: 150; width: min(440px, calc(100vw - 28px)); transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 14px; color: var(--ink); background: rgba(255,253,248,.96); box-shadow: 0 12px 30px rgba(26,26,46,.18); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  /* 固定居中不与 Motion 共用 transform；空白区域放过点击，提示按钮仍可操作。 */
+  .portal-feedback-host { position: fixed; top: 78px; left: 0; right: 0; z-index: 150; display: flex; justify-content: center; pointer-events: none; }
+  .portal-feedback { width: min(440px, calc(100vw - 28px)); pointer-events: auto; display: flex; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 14px; color: var(--ink); background: rgba(255,253,248,.96); box-shadow: 0 12px 30px rgba(26,26,46,.18); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
   .portal-feedback__mark { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; border-radius: 50%; color: #fff; background: var(--moss); font-size: 16px; font-weight: 800; }
   .portal-feedback__copy { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 2px; }
   .portal-feedback__copy strong { font-size: 13.5px; line-height: 1.35; }
@@ -942,7 +944,8 @@
     .portal-emblem { width: 44px; height: 44px; }
     .portal-title { font-size: 25px; }
     .portal-affiliation { font-size: 11px; line-height: 1.3; }
-    .portal-feedback { top: 70px; width: calc(100vw - 24px); }
+    .portal-feedback-host { top: 70px; }
+    .portal-feedback { width: calc(100vw - 24px); }
     .portal-feedback__action { padding-inline: 8px; font-size: 11px; }
     
     .portal-main { padding: 22px 14px 6px; }
