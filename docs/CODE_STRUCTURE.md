@@ -12,7 +12,12 @@
 
 | 文件 | 主要职责 | 修改前优先搜索的锚点 |
 |---|---|---|
-| `server.js` | 环境配置、SQLite 运行时数据访问、安全中间件、图片处理、全部 API、页面入口 | `// ====================`、具体路由字符串 |
+| `server.js` | 启动配置、仓储与邮件装配、会话、图片和未拆 API、页面入口 | `createRecordService`、`createRecordRouter`、具体路由 |
+| `backend/records/routes.js` | 14 个借还记录接口的路径、HTTP 映射、限流和权限装配 | `createRecordRouter` |
+| `backend/records/service.js` | 借还、记录生命周期、批量冲突与事务编排 | `createRecordService`、各业务方法 |
+| `backend/records/validation.js` | 手机号规范化/校验、旧字段兼容 | `normalizePhone`、`withRecordCompatibility` |
+| `backend/records/return-authorization.js` | 按实例隔离的十分钟归还凭证 | `createReturnAuthorizationStore` |
+| `backend/middleware/admin-permissions.js` | 共享管理员权限工厂，注入账号查询 | `createAdminPermissions` |
 | `db/repository.js` | SQLite 初始化、JSON 首次迁移、对象字段转换和事务封装 | `createSqliteStore`、`transaction`、表映射 |
 | `db/schema.sql` | SQLite 表、索引和约束定义 | `CREATE TABLE`、表名 |
 | `scripts/migrate-json-to-sqlite.js` | 将 JSON 数据复制到 SQLite，事务导入并拒绝覆盖已有目标库 | `migrate`、`--data-dir`、`--output` |
@@ -56,7 +61,7 @@ flowchart TD
 | 需求类型 | 首要文件 | 常用搜索锚点 | 配套验证 |
 |---|---|---|---|
 | 用户端借用流程 | `frontend/src/main.js`、`frontend/src/composables/use-borrow-cart.js` | `const BorrowPage`、`doBorrow`、`doBatchBorrow`、`settleBatchBorrow` | `test/frontend-source.test.js`、`test/borrow-cart.test.js`、`test/server.test.js` |
-| 用户端归还流程 | `frontend/src/main.js`、`server.js` | `lookupReturns`、`doReturn`、`return-lookup` | 同上 |
+| 用户端归还流程 | `frontend/src/main.js`、`backend/records/` | `lookupReturns`、`doReturn`、`return-lookup` | 同上 |
 | 管理员邮件通知 | `server.js`、`email-service.js`、`frontend/src/main.js` | `normalizeEmailSettings`、`queueEmailNotification`、`sendSmtpMail`、`email-notifications` | `test/email-service.test.js`、`test/email-notification.test.js`、`test/server.test.js` |
 | 搜索、分类筛选、设备卡片 | `frontend/src/main.js`、`frontend/src/components/MotionDeviceCard.tsx`、`frontend/src/composables/use-device-presentation.js` | `portal-chips`、`filteredDevices`、`MotionDeviceCard`、`categoryIcon` | `test/frontend-source.test.js`、`test/device-presentation.test.js` + 用户手动浏览器检查 |
 | 用户端布局、颜色、导航、动画 | `frontend/index.html` | `.portal-`、`借还页`、`prefers-reduced-motion` | `test/frontend-source.test.js` + 用户手动桌面/移动检查 |
@@ -65,8 +70,8 @@ flowchart TD
 | 管理端样式 | `frontend/index.html` | `管理后台`、`.admin-`、`.device-card` | 用户手动浏览器检查 |
 | 设备 CRUD/上下线 | `server.js` | `设备 CRUD API`、`/api/devices` | `test/server.test.js` |
 | 分类 CRUD | `server.js`、`frontend/src/main.js` | `分类 API`、`分类管理` | `test/server.test.js`、`test/frontend-source.test.js` |
-| 借还记录、归档、恢复 | `server.js` | `借还记录 API`、具体路由 | `test/server.test.js` |
-| 登录、会话、权限 | `server.js`、`frontend/src/main.js` | `checkAdmin`、`sessions`、`doLogin` | `test/security-config.test.js`、`test/server.test.js` |
+| 借还记录、归档、恢复 | `backend/records/` | `createRecordRouter`、`createRecordService` | `test/backend-records.test.js`、`test/server.test.js` |
+| 登录、会话、权限 | `server.js`、`backend/middleware/admin-permissions.js`、`frontend/src/main.js` | `checkAdmin`、`sessions`、`doLogin` | `test/security-config.test.js`、`test/server.test.js` |
 | 上传与图片优化 | `server.js`、`frontend/src/main.js` | `optimizeUploadedImage`、`onImageChange`、`saveDevice` | `test/server.test.js`、`test/build-config.test.js` |
 | 二维码 | `server.js`、`frontend/src/main.js` | `/api/qrcode/portal`、`generateDeviceQR` | `test/server.test.js` |
 | CSP、限流、安全头 | `server.js` | `cspDirectives`、`loginLimiter`、`borrowReturnLimiter` | `test/security-config.test.js` |
@@ -81,7 +86,13 @@ flowchart TD
 
 ```text
 设备管理/
-├─ server.js                         # 后端、API、静态页面入口
+├─ server.js                         # 启动装配、会话、未拆 API 与页面入口
+├─ backend/
+│  ├─ records/routes.js              # 借还记录 14 个路由及 HTTP 映射
+│  ├─ records/service.js             # 同步借还业务，注入仓储/邮件/共享函数
+│  ├─ records/validation.js          # 手机号与旧记录字段兼容
+│  ├─ records/return-authorization.js # 独立内存归还凭证
+│  └─ middleware/admin-permissions.js # 管理员权限工厂
 ├─ email-service.js                  # 无第三方依赖的 SMTP 客户端
 ├─ package.json                      # npm 脚本与依赖
 ├─ vite.config.js                    # Vite 构建、别名和开发代理
@@ -155,7 +166,16 @@ flowchart TD
 
 小程序不参与 Vite 构建，也不由 Express 静态页面路由托管。微信开发者工具应直接导入 `miniprogram/`；`project.config.json` 已写入 AppID `wx46f682f7e11b893d`，`config.js` 只保存公开的 `https://cyb3r.art` API 地址。小程序调用现有公开 API，不复制管理员会话，也不应把 AppSecret 放进目录。
 
-## 5. 后端 `server.js`
+## 5. 后端装配与借还记录域
+
+第一批已迁移 `/api/records` 的全部 14 个接口，其余业务仍在 server.js。装配顺序保持安全/会话/限流在前、业务路由在后：server.js -> createRecordService（唯一 DATA_STORE、集合标识、原邮件队列和共享函数）-> createRecordRouter -> 同步方法 `{ status, body }` -> HTTP 响应。
+
+业务模块不导入 server.js，不创建数据库/HTTP 服务，不直接调用 SMTP。数据库对外的 databasePath/readCollection/writeCollection/transaction/close、同步行为、完整集合读写和原事务顺序保持不变；日志写入仍通过注入的 appendOperationLog 使用同一个仓储。邮件配置、加密、模板、隐私变量和真正的异步投递暂留入口与 email-service.js。
+
+路由保持 6 个公共接口共享同一个借还限流器，8 个管理接口逐路由检查 records 权限；没有给整个前缀统一加管理员限制。权限工厂也用于尚未拆分的管理路由，账号删除或权限变更仍实时查询。
+
+兼容细节：既有 catch 的 HTTP 200/500 区别不做统一；批量用户归还在循环内先消费内存凭证、再提交仓储，单台在提交后消费，本轮保留失败时两者的原差异。归还凭证在每个记录服务实例内隔离，生产仍仅装配一个实例。
+
 
 ### 5.1 启动与目录解析
 
@@ -184,7 +204,7 @@ flowchart TD
 
 ### 5.3 数据与兼容层
 
-`server.js` 保留 `readJSON`/`writeJSON` 这一组兼容调用名，但实际由 `db/repository.js` 将对象字段映射到 SQLite 表；数据库不存在时只执行一次 JSON 首次迁移，数据库存在后不再读取或写回 JSON。`scripts/migrate-json-to-sqlite.js` 负责离线副本生成，运行时初始化复用相同的迁移逻辑。所有兼容规则集中在：
+`server.js` 保留 `readJSON`/`writeJSON` 这一组兼容调用名，但实际由 `db/repository.js` 将对象字段映射到 SQLite 表；数据库不存在时只执行一次 JSON 首次迁移，数据库存在后不再读取或写回 JSON。`scripts/migrate-json-to-sqlite.js` 负责离线副本生成，运行时初始化复用相同的迁移逻辑。共享兼容规则位于以下函数（记录字段兼容已迁入 backend/records/validation.js）：
 
 - `withDeviceCompatibility`：补齐分类、运营状态、图片缩略图与宽高。
 - `withRecordCompatibility`：兼容旧 `department`/`notes` 字段。
@@ -198,7 +218,7 @@ flowchart TD
 两类状态不会写入 JSON：
 
 - `sessions`：管理员会话，8 小时过期，客户端通过 `x-session-id` 传递。
-- `returnAuthorizations`：归还查询凭证，10 分钟过期。
+- `backend/records/return-authorization.js` 内部 `returnAuthorizations`：归还查询凭证，10 分钟过期，每个记录服务实例独立。
 
 服务重启后两者都会失效。这是当前单实例架构的明确限制。
 
@@ -376,7 +396,7 @@ flowchart TD
 
 借用和归还邮件：
 
-`POST /api/records/borrow` 或 `POST /api/records/borrow-other` → 写入普通借用记录（后者不改库存）→ `queueEmailNotification('borrow', record)` → `email-service.js.sendSmtpMail` 异步投递；批量操作改走 `queueBatchEmailNotification`，只投递一封并按借用人分组。SMTP 失败只写服务端日志，不影响借还响应。
+`backend/records/routes.js` 的借出接口 → `service.borrow` 或 `service.borrowOther` → 写入普通借用记录（后者不改库存）→ `queueEmailNotification('borrow', record)` → `email-service.js.sendSmtpMail` 异步投递；批量操作改走 `queueBatchEmailNotification`，只投递一封并按借用人分组。SMTP 失败只写服务端日志，不影响借还响应。
 
 `formatEmailRecordGroup` 负责单台/批量明细格式；其他设备名称不携带提醒文字，`deviceNotice` 单独展示，型号和编号缺失分别使用可读兜底文案。管理端默认三类正文已直接填入事件、提醒、明细、时间和备注结构。旧模板未使用新变量时，系统自动补充其他设备提醒和批量明细；历史系统简略正文读取时自动升级，多借用人顶部使用中性提示，避免误显示第一人。测试邮件也复用单台明细格式。
 
@@ -384,7 +404,7 @@ flowchart TD
 
 `lookupReturns` → `POST /api/records/return-lookup` → 精确匹配姓名和完整手机号 → 创建 10 分钟凭证 → `doReturn` → `POST /api/records/return` → 写入 `returnedAt`/备注 → 将设备设为 `available`。
 
-用户归还和管理员归还在各自记录写入成功后分别调用 `queueEmailNotification('return' | 'adminReturn', record)`，是否发送由邮件设置中的独立开关控制。
+backend/records/service.js 的用户归还和管理员归还在各自记录写入成功后分别调用 `queueEmailNotification('return' | 'adminReturn', record)`，是否发送由邮件设置中的独立开关控制。
 
 单台归还或全部成功的批量归还完成后，`showActionFeedback` 为用户端非阻塞通知附加 `/answers` 操作；答案页由 `AnswersPage` 从本地 `ANSWER_BOOK_RESPONSES` 抽取文案，不调用 API、不写入数据。
 
@@ -404,6 +424,7 @@ flowchart TD
 
 | 测试文件 | 保护范围 | 何时必须扩展 |
 |---|---|---|
+| `test/backend-records.test.js` | 注入仓储与队列、快照回滚、凭证、权限、14 个路由映射 | 后端分层边界与兼容行为变化 |
 | `test/server.test.js` | API、权限、隐私、状态、归档、分类重排、图片、邮件配置 | 后端业务行为或数据字段变化 |
 | `test/email-service.test.js` | SMTP 认证、收件人、UTF-8 主题和正文编码 | SMTP 协议或邮件格式变化 |
 | `test/email-notification.test.js` | 单台/批量借还邮件、其他设备提醒、测试邮件明细、手机号脱敏与旧模板兼容 | 通知触发、模板或隐私口径变化 |
@@ -443,7 +464,7 @@ npm run build
 
 当前结构适合单实例、小规模内部使用；SQLite 已接管业务运行时读写，旧 JSON 仅保留为首次迁移输入和人工备份。当前还有以下明确限制：
 
-1. `server.js` 同时承担配置、存储、鉴权、图片处理和全部路由，修改共享逻辑时回归面较大。
+1. 借还记录域与权限中间件已拆分，server.js 仍承担配置、仓储装配、账号/会话、邮件和其余业务路由，尚未成为纯启动入口。
 2. `frontend/src/main.js` 同时包含两套大模板和全部状态，UI 小改动也容易触及长文件。
 3. 当前仍是单实例部署；SQLite 已为关键跨表操作提供事务和 WAL，但尚未形成多实例部署、共享会话和高可用方案。
 4. 会话和归还凭证只在内存中，服务重启即失效。
@@ -454,7 +475,7 @@ npm run build
 
 1. 先将前端分类图标、设备卡片等纯展示片段拆为可测试组件。
 2. 再将 `BorrowPage` 和 `AdminPage` 拆为独立模块或 `.vue` 组件。
-3. 后端继续按 categories/devices/records/admin 拆分路由，保留 `db/repository.js` 作为统一数据访问边界。
+3. 复用已完成的 records 域模式，后端继续按 categories/devices/admin 拆分；冻结 `db/repository.js` 的五个公共成员和同步完整快照语义。
 4. 只有在并发需求出现后再引入共享会话、任务队列或多实例协调机制，不提前增加部署复杂度。
 
 ## 13. 历史 UI 问题定位（已处理）

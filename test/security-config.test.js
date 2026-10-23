@@ -1,9 +1,12 @@
+// 安全源码检查按装配入口和权限模块分别定位，保留原有安全要求。
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const serverSource = fs.readFileSync(path.resolve(__dirname, '../server.js'), 'utf8');
+const permissionSource = fs.readFileSync(path.resolve(__dirname, '../backend/middleware/admin-permissions.js'), 'utf8');
+const recordRouteSource = fs.readFileSync(path.resolve(__dirname, '../backend/records/routes.js'), 'utf8');
 const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8'));
 
 test('production startup requires an administrator password from the environment', () => {
@@ -57,4 +60,17 @@ test('Content-Security-Policy keeps self-hosted styles and fonts local', () => {
 // 一言仅允许从官方语句接口发起浏览器连接，不扩大其他 CSP 来源。
 test('Content-Security-Policy permits the official Hitokoto sentence endpoint', () => {
   assert.match(serverSource, /connectSrc:\s*\["'self'",\s*'https:\/\/v1\.hitokoto\.cn'\]/);
+});
+
+test('record routes mount after session setup and preserve permission and limiter boundaries', () => {
+  assert.ok(serverSource.indexOf('req.session = session') < serverSource.indexOf("app.use('/api/records'"));
+  assert.match(serverSource, /createAdminPermissions\(\{\s*getAdminUserById, normalizeAdminPermissions/);
+  assert.match(serverSource, /service: recordService, borrowReturnLimiter, requireAdminPermission/);
+  assert.equal((recordRouteSource.match(/requireAdminPermission\('records'\)/g) || []).length, 8);
+  assert.equal((recordRouteSource.match(/, borrowReturnLimiter,/g) || []).length, 6);
+  assert.match(permissionSource, /getAdminUserById\(req\.session\.adminUserId\)/);
+  assert.match(permissionSource, /normalizeAdminPermissions\(user\.permissions\)\.includes\(permission\)/);
+  assert.match(permissionSource, /status\(401\)/);
+  assert.match(permissionSource, /status\(403\)/);
+  assert.doesNotMatch(serverSource, /app\.(get|post|put|delete)\('\/api\/records/);
 });
