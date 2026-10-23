@@ -1,4 +1,4 @@
-// SQLite 运行时适配层：保持现有对象字段名，统一将业务数据读写到关系数据库。
+// SQLite 运行时适配层：记录完整快照按差异写入，保留字段转换、数组顺序与事务边界。
 const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
@@ -149,7 +149,8 @@ function createSqliteStore({ dataDir, databasePath = path.join(dataDir, 'device-
       const row = db.prepare('SELECT * FROM email_settings WHERE id = 1').get();
       return row ? emailFromRow(row) : {};
     }
-    const rows = db.prepare(`SELECT * FROM ${table}`).all();
+    // 旧记录重写按输入顺序分配 rowid；显式保持该读取顺序，不按 ID 或归档状态重排。
+    const rows = db.prepare(`SELECT * FROM ${table}${table === 'records' ? ' ORDER BY rowid' : ''}`).all();
     if (table === 'categories') return rows.map(categoryFromRow);
     if (table === 'devices') return rows.map(deviceFromRow);
     if (table === 'records') return rows.map(recordFromRow);
@@ -197,19 +198,45 @@ function createSqliteStore({ dataDir, databasePath = path.join(dataDir, 'device-
   }
 
   function replaceRecords(records) {
-    db.exec('DELETE FROM records');
-    const insert = db.prepare(`INSERT INTO records (
-      id, device_id, device_name, device_model, is_other_device, other_device_name, type,
-      borrower_name, borrower_id, borrower_phone, major, purpose, department, notes,
-      created_at, returned_at, return_notes, deleted_at, deleted_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-    for (const record of records) {
-      insert.run(
+    // 先沿用原转换生成快照，禁止重复 ID 被 Map 静默合并；比较数据库行而不缓存上次输入。
+    const columns = [
+      'id', 'device_id', 'device_name', 'device_model', 'is_other_device', 'other_device_name', 'type',
+      'borrower_name', 'borrower_id', 'borrower_phone', 'major', 'purpose', 'department', 'notes',
+      'created_at', 'returned_at', 'return_notes', 'deleted_at', 'deleted_by'
+    ];
+    const nextIds = new Set();
+    const next = records.map(record => {
+      const values = [
         text(record.id), nullableText(record.deviceId), text(record.deviceName), text(record.deviceModel), record.isOtherDevice ? 1 : 0,
         text(record.otherDeviceName), text(record.type, 'borrow'), text(record.borrowerName), text(record.borrowerId),
         text(record.borrowerPhone), text(record.major), text(record.purpose), text(record.department), text(record.notes),
         text(record.createdAt), nullableText(record.returnedAt), text(record.returnNotes), nullableText(record.deletedAt), nullableText(record.deletedBy)
-      );
+      ];
+      if (nextIds.has(values[0])) throw new Error('UNIQUE constraint failed: records.id');
+      nextIds.add(values[0]);
+      return values;
+    });
+    const existing = db.prepare('SELECT rowid AS snapshot_rowid, * FROM records ORDER BY rowid').all();
+    const byId = new Map(existing.map(row => [row.id, row]));
+    const remove = db.prepare('DELETE FROM records WHERE id IS ?');
+    for (const row of existing) {
+      if (!nextIds.has(row.id)) remove.run(row.id);
+    }
+
+    const placeholders = columns.map(() => '?').join(', ');
+    const insert = db.prepare(`INSERT INTO records (rowid, ${columns.join(', ')}) VALUES (?, ${placeholders})`);
+    const update = db.prepare(`UPDATE records SET rowid = ?, ${columns.map(column => `${column} = ?`).join(', ')} WHERE id = ?`);
+    // 维持仍递增的原 rowid；中间插入/重排只将必要后缀移到原最大 rowid 之后，避免碰撞。
+    let maximumRowid = existing.reduce((maximum, row) => Math.max(maximum, row.snapshot_rowid), 0);
+    let previousRowid = -Infinity;
+    for (const values of next) {
+      const row = byId.get(values[0]);
+      const rowid = row && row.snapshot_rowid > previousRowid ? row.snapshot_rowid : ++maximumRowid;
+      if (!row) insert.run(rowid, ...values);
+      else if (rowid !== row.snapshot_rowid || columns.some((column, index) => row[column] !== values[index])) {
+        update.run(rowid, ...values, values[0]);
+      }
+      previousRowid = rowid;
     }
   }
 

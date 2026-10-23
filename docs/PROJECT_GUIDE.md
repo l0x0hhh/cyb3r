@@ -79,7 +79,7 @@
 | 路径 | 职责 | 何时查看 |
 | --- | --- | --- |
 | `server.js` | Express API、权限、校验、SQLite 数据读写、上传、二维码和页面入口 | 后端接口、数据、隐私、安全 |
-| `db/repository.js` | SQLite 初始化、JSON 首次迁移、对象字段转换和事务封装 | 数据源切换、事务、数据库故障 |
+| `db/repository.js` | SQLite 初始化、JSON 首次迁移、对象字段转换、记录完整快照差异写入和事务封装 | 数据源切换、写入效率、事务、数据库故障 |
 | `email-service.js` | SMTP 连接、认证和纯文本投递 | 邮件协议或投递问题 |
 | `frontend/src/main.js` | Vue 用户门户、答案之书彩蛋、管理后台和交互状态；页面级 Motion 进入、手势、滚动和反馈动效 | 页面行为、表单、接口调用或页面级动效 |
 | `frontend/src/components/MotionDeviceCard.tsx` | 用户端设备卡片的 Vue TSX 结构、Motion 滚动进入和图片事件转发 | 设备卡片结构、卡片入场动效或图片事件 |
@@ -120,6 +120,8 @@
 SQLite 运行时：`db/schema.sql` 定义目标表结构，`db/repository.js` 在数据库不存在时调用同等迁移逻辑导入旧 JSON；数据库存在后，所有业务读写都经对象适配层进入 SQLite。关键跨表操作使用 `BEGIN IMMEDIATE` 事务，服务退出前关闭数据库句柄，并启用 WAL 和 busy timeout。独立脚本 `npm run migrate:sqlite -- --data-dir <JSON目录> --output <SQLite文件>` 仍可用于生成不覆盖已有文件的离线副本。
 
 兼容规则：旧设备缺少分类按 `cat-other`，缺少运营状态按 `online`，缺少图片变体或展示字段按旧图片/自然比例回退；旧记录 `department`/`notes` 分别兼容读取为 `major`/`purpose`；新写入暂时保留旧字段。详情字段和完整示例见 `CODE_STRUCTURE.md` 及源码测试，不在本入口重复大段 JSON。
+
+仓储固定保留 `createSqliteStore` 的 `databasePath/readCollection/writeCollection/transaction/close` 及同步调用。`writeCollection` 仍接收完整快照，缺失 ID 表示删除，空数组表示清空。记录集合按原字段转换后识别增删改，未变化行跳过 DML，不新增字段兜底。记录显式按 rowid 保留输入数组顺序，中间插入或重排额外调整必要后缀 rowid，不按 ID、归档或日期重新排序。其他集合及 JSON、事务、WAL、关闭逻辑保持原样。内部仍全量读取与比较，收益是预期减少行写入，未做性能实测；新增内存检查未在本地执行。专项实现与整合边界见 [`tasks/sqlite-repository.md`](tasks/sqlite-repository.md)。
 
 ## 6. 任务路由
 
