@@ -1,4 +1,4 @@
-// 安全源码检查按装配入口和权限模块分别定位，保留原有安全要求。
+// 安全源码检查按装配入口和权限模块定位；限流计数仅匹配路由注册，排除工厂参数。
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -67,7 +67,7 @@ test('record routes mount after session setup and preserve permission and limite
   assert.match(serverSource, /createAdminPermissions\(\{\s*getAdminUserById, normalizeAdminPermissions/);
   assert.match(serverSource, /service: recordService, borrowReturnLimiter, requireAdminPermission/);
   assert.equal((recordRouteSource.match(/requireAdminPermission\('records'\)/g) || []).length, 8);
-  assert.equal((recordRouteSource.match(/, borrowReturnLimiter,/g) || []).length, 6);
+  assert.equal((recordRouteSource.match(/router\.post\('[^']+',\s*borrowReturnLimiter,/g) || []).length, 6);
   assert.match(permissionSource, /getAdminUserById\(req\.session\.adminUserId\)/);
   assert.match(permissionSource, /normalizeAdminPermissions\(user\.permissions\)\.includes\(permission\)/);
   assert.match(permissionSource, /status\(401\)/);
