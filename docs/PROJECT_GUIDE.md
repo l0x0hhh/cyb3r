@@ -1,6 +1,6 @@
 # 学院设备管理系统项目导航
 
-> 最后更新：2026-10-21
+> 最后更新：2026-10-23
 > 本文是稳定规则和定位入口；当前任务与验证状态只看 [`CURRENT_STATUS.md`](CURRENT_STATUS.md)，历史记录见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 1. 项目概览
@@ -33,6 +33,8 @@
 - `/answers` 是复用前端入口的普通用户页面，不需要登录，不新增 API，也不记录用户问题或答案；页面采用参考站点的白底居中三态布局和核心文案。
 - 初始态展示本地托管的 `answer-book.png` 与“在心中思考一个问题，点击答案之书探索可能的答案”，翻书态展示本地 loading 动画与“正在翻书...”，结果态展示随机答案、“发给朋友”和返回 `/answers` 首页的“再抽一次”；结果文字需在桌面端和移动端容器内自适应换行。
 - “发给朋友”在支持系统分享的移动端调用系统分享，否则复制分享文案并显示“文案已复制，快发给朋友咯”；点击站点标题返回 `/borrow`；页面适配桌面端和 390px 移动端，并遵守 `prefers-reduced-motion`。
+- 固定答案统一存于 `frontend/src/content/answer-book-responses.json`。结果字体保持原字形，使用覆盖当前答案、空格和引号的带指纹 WOFF 子集；仅进入答案页时预加载，`font-display: swap` 允许网络失败时仍显示可读文字。原 TTF 保留作生成源，页面不再下载完整 TTF。
+- 修改答案文案或原字体后，用本地 Python + FontTools 执行 `python scripts/subset-answer-font.py`，同步生成字体文件、`content/answer-book-font.js` 元数据和 HTML 字体 URL。生成资产随源码提交，生产与 CI 不需要 Python。字体检查会核对原/子字体指纹、64 KiB 体积上限及答案字符覆盖。
 - 文案仅为娱乐性彩蛋，不应被解释为设备管理、健康或其他现实决策建议。
 
 ### 设备状态与分类
@@ -84,6 +86,7 @@
 | `frontend/src/components/borrow-motion.js` | 显式 Motion 组件注册表、卡片视口动画及无观察器/减少动态效果时的静态策略 | 字符串模板动效注册或触发问题 |
 | `frontend/src/composables/use-device-presentation.js` | 分类 ID 到内置 SVG 的映射、图片加载/失败缓存、裁剪与卡片展示数据；不调用业务 API | 用户端分类图标、图片兜底或展示缓存 |
 | `frontend/src/composables/use-borrow-cart.js` | 清单增删、10 台上限、面板/弹窗开关、提交快照和成功设备移除；不调用 API 或存储个人信息 | 借用清单、部分成功或异步提交期间的选择 |
+| `frontend/src/composables/use-answer-font.js`、`frontend/src/content/answer-book-*.{js,json}` | 答案页专用字体预加载、固定文案及生成字体元数据 | 答案字体、文案或预加载时机 |
 | `frontend/src/types/device.ts` | 共享图片字段、分类、卡片展示、清单摘要及图片事件的类型契约 | 展示/清单数据边界或事件类型 |
 | `frontend/index.html` | HTML 入口、用户端/答案之书/管理端全局响应式样式 | 布局、视觉、移动端样式、用户端粒子层样式 |
 | `public/js/anime.min.js` | Anime.js 2.2.0 静态动画依赖 | 用户端点击粒子特效按需加载 |
@@ -93,6 +96,8 @@
 | `.github/workflows/ci.yml` | GitHub Actions CI/CD：PR 只检查；main 检查成功且 CD_ENABLED 开启后自动部署该提交 | CI/CD 配置或验证流程 |
 | `deploy/update-from-git.sh`、`deploy/setup-cd.sh` | 精确 SHA 发布、独立版本目录、代码回退及一次性受限 SSH 入口安装；操作见 `docs/CI_CD.md` | 自动部署与故障恢复 |
 | `scripts/migrate-image-variants.js` | 旧图片 WebP 变体迁移 | 迁移或图片兼容 |
+| `scripts/subset-answer-font.py` | 从答案 JSON 与原 TTF 生成压缩子集、指纹和字符清单，更新 HTML 字体引用 | 修改固定答案或原字体后手动离线生成 |
+| `docs/REFACTOR_TASKS.md` | 多窗口任务说明、文件归属、固定接口和整合顺序 | 并行重构前分配独立工作树任务 |
 | `test/` | 后端、前端、邮件、安全和部署契约测试 | 行为改动后补测试 |
 | `miniprogram/` | 暂缓的微信小程序普通用户端 | 仅处理小程序事项时查看 |
 | `data/`、`uploads/`、`public/qrcodes/` | 本地开发持久化和资源；`data/device-management.sqlite` 为运行时业务数据库，旧 JSON 仅用于首次迁移或备份 | 不提交真实数据；部署不得覆盖数据库、JSON 备份、上传和二维码 |
@@ -175,4 +180,5 @@ npm run build
 - 当前事实只写 `CURRENT_STATUS.md`：目标、第一待办、状态快照、活跃事项和阻塞。
 - 稳定产品规则、接口/数据兼容、代码职责或部署边界变化时更新本文或 `CODE_STRUCTURE.md`。
 - 每轮完成后在 `CHANGELOG.md` 追加一条短记录；不要把历史过程复制回启动文档。
+- 多窗口使用独立工作树和分支，按 `REFACTOR_TASKS.md` 的文件边界实施；共享文档在主窗口整合，各任务不自行推送 main 或部署。
 - 不在任何文档中写入真实密码、完整手机号、真实借用人信息或生产 SMTP 密钥。

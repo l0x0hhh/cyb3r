@@ -1,4 +1,4 @@
-<!-- 借还提示由外层固定居中、内层播放动效，保留本地字体与响应式图片展示。 -->
+<!-- 借还提示定位与动效分层；答案结果使用按实际文案裁剪的本地小字体。 -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -476,8 +476,8 @@
   .portal-feedback-enter-active, .portal-feedback-leave-active { transition: opacity .2s ease, transform .2s ease; }
   .portal-feedback-enter-from, .portal-feedback-leave-to { opacity: 0; transform: translate(-50%, -8px); }
 
-  /* 答案之书页复用参考站点的白底、居中排版、翻书等待和结果分享布局。 */
-  @font-face { font-family: 'AnswerBookFont'; src: url('/assets/answer-book.ttf') format('truetype'); font-display: swap; }
+  /* 答案页保留原字形，字体子集由脚本生成；swap 保证网络失败时结果仍可阅读。 */
+  @font-face { font-family: 'AnswerBookFont'; src: url('/fonts/answer-book-results-1b8511e63397.woff') format('woff'); font-display: swap; }
   .answers-page { position: relative; display: flex; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; color: #000; background: #fff; user-select: none; -webkit-user-select: none; }
   .answers-site-title { position: absolute; top: 16px; left: 24px; z-index: 2; font-size: 16px; font-weight: 500; }
   .answers-site-title a { display: inline-flex; align-items: center; color: inherit; text-decoration: none; }

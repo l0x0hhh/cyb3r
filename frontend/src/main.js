@@ -1,10 +1,12 @@
-// 前端职责整理：展示与清单独立维护，反馈定位与动画分层，批量提交保留未成功条目和改填表单。
+// 前端职责整理：展示与清单独立维护、反馈定位分层，答案页提前请求专用小字体。
 import * as Vue from 'vue';
 import { useReducedMotion } from 'motion-v';
 import { borrowMotionComponents } from './components/borrow-motion.js';
 import MotionDeviceCard from './components/MotionDeviceCard.tsx';
 import { useDevicePresentation } from './composables/use-device-presentation.js';
 import { useBorrowCart } from './composables/use-borrow-cart.js';
+import { preloadAnswerFont } from './composables/use-answer-font.js';
+import ANSWER_BOOK_RESPONSES from './content/answer-book-responses.json';
 const { createApp } = Vue;
 
 // 用户端点击特效按需加载，管理员后台不创建 Canvas 也不请求特效脚本。
@@ -1053,25 +1055,6 @@ const BorrowPage = {
 };
 
 // 答案之书页复刻参考站点的三态交互，答案和分享文案始终只在浏览器本地处理。
-const ANSWER_BOOK_RESPONSES = [
-  '要更加努力',
-  '不要害怕求助',
-  '保持冷静',
-  '现在就行动',
-  '你已经准备好了',
-  '相信你的直觉',
-  '情况看起来很好',
-  '现在说什么都太早了',
-  '需要更多的耐心',
-  '考虑不同的观点',
-  '不要忽视你的感受',
-  '你离成功不远',
-  '不要过度分析',
-  '保持开放的心态',
-  '这可能是你一直在等待的机会',
-  '时间会告诉一切'
-];
-
 const AnswersPage = {
   setup() {
     const answer = Vue.ref('');
@@ -1161,6 +1144,7 @@ const AnswersPage = {
       document.documentElement.classList.add('answers-route');
       document.body.classList.add('answers-route');
       document.title = '答案之书在线免费测试 - 在犹豫不决时，找到内心的答案';
+      preloadAnswerFont();
       if (!customElements.get('dotlottie-player')) {
         const playerScript = document.createElement('script');
         playerScript.type = 'module';

@@ -1,6 +1,6 @@
 # 设备管理项目代码结构与定位指南
 
-> 最后更新：2026-10-21
+> 最后更新：2026-10-23
 > 适用版本：当前本地工作区（网页端 UX、管理员邮件通知、原生微信小程序普通用户端）  
 > 用途：回答“一个需求应该改哪里、会影响什么、用什么验证”。产品规则以 [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) 为准，短期进度以 [`CURRENT_STATUS.md`](CURRENT_STATUS.md) 为准。
 
@@ -22,6 +22,8 @@
 | `frontend/src/components/borrow-motion.js` | 字符串模板的显式组件注册及卡片视口/静态动效策略 | `borrowMotionComponents`、`cardVariants`、`whileInView` |
 | `frontend/src/composables/use-device-presentation.js` | 分类图标、图片状态、裁剪回退和按设备缓存的展示数据；页面只负责接入 | `useDevicePresentation`、`getDeviceCardPresentation`、`detailMediaStyle` |
 | `frontend/src/composables/use-borrow-cart.js` | 只读清单摘要、数量上限、弹窗状态和提交快照结算；页面持有表单和接口调用 | `useBorrowCart`、`snapshotBorrowCart`、`settleBatchBorrow` |
+| `frontend/src/composables/use-answer-font.js` | 只在答案页进入时预加载字体；去重且不阻塞抽签 | `preloadAnswerFont` |
+| `frontend/src/content/answer-book-responses.json`、`answer-book-font.js` | 固定答案与生成的字体 URL/字符/指纹，页面和生成脚本共用数据 | `ANSWER_BOOK_RESPONSES`、`answerBookFont` |
 | `frontend/index.html` | HTML 入口、全局 CSS、响应式与动画 | `/* ============ 借还页`、`答案之书彩蛋`、`弹窗 & 表单`、`管理后台`、`动画` |
 | `miniprogram/services/api.js` | 小程序统一请求、API 地址、图片地址和日期格式化 | `request`、`assetUrl` |
 | `miniprogram/pages/*` | 小程序普通用户列表、详情、借用表单、归还查询页面 | `pages/borrow`、`pages/detail`、`pages/borrow-form`、`pages/return` |
@@ -91,6 +93,9 @@ flowchart TD
 │  ├─ src/components/borrow-motion.js # 字符串模板组件注册与卡片动画策略（@ts-check）
 │  ├─ src/composables/use-device-presentation.js # 分类/图片展示状态及卡片缓存（@ts-check）
 │  ├─ src/composables/use-borrow-cart.js # 借用清单、数量上限和提交快照结算（@ts-check）
+│  ├─ src/composables/use-answer-font.js # 答案页字体预加载（@ts-check）
+│  ├─ src/content/answer-book-responses.json # 固定答案的唯一文案源
+│  ├─ src/content/answer-book-font.js # 生成的字体 URL、字符覆盖和指纹
 │  ├─ src/types/device.ts            # 设备/展示数据/图片事件类型
 │  └─ dist/                          # 构建产物，禁止手工修改
 ├─ miniprogram/                      # 原生微信小程序普通用户端（独立导入开发者工具）
@@ -100,7 +105,7 @@ flowchart TD
 │  └─ pages/                          # borrow、detail、borrow-form、return 四个页面
 ├─ public/
 │  ├─ assets/                        # 院徽、favicon 等源码静态资源
-│  ├─ fonts/                         # Noto Sans SC 400/700 的本地 WOFF2 子集与许可证
+│  ├─ fonts/                         # Noto Sans SC WOFF2 与答案之书带指纹 WOFF 子集
 │  ├─ js/                            # 用户端按需加载的静态动画脚本
 │  │  ├─ anime.min.js                # Anime.js 2.2.0
 │  │  └─ fireworks.js                 # 用户端 Canvas 点击粒子特效
@@ -117,6 +122,7 @@ flowchart TD
 │  ├─ motion-components.test.js      # Node SSR 原生元素与视口/静态策略回归
 │  ├─ device-presentation.test.js     # 分类映射、图片状态、裁剪兜底和响应式缓存回归
 │  ├─ borrow-cart.test.js             # 清单上限、快照、部分成功与实例隔离回归
+│  ├─ answer-font.test.js             # 字体指纹、体积与固定答案字符覆盖回归
 │  ├─ security-config.test.js        # 安全与生产配置
 │  ├─ build-config.test.js           # 构建、依赖、静态资源
 │  ├─ ci-workflow.test.js            # CI/CD 触发边界、提交及主机校验
@@ -463,6 +469,8 @@ npm run build
 | 详情页竖图贴左并出现单侧空白 | 外层媒体容器强制比例并受最大高度约束，容器自身发生缩窄 | 移除详情外层比例，媒体区全宽 flex 居中，图片使用 `contain` 和原始比例 |
 
 ## 14. 维护本文
+
+多窗口分工与整合顺序见 `REFACTOR_TASKS.md`：前端页面与 API 为同一窗口，后端分层和仓储内部优化各用独立工作树，冻结仓储接口后可并行。字体由 `scripts/subset-answer-font.py` 从固定答案 JSON 和原 TTF 离线生成；改字、换字或迁移文案路径时同步重建并核对引用。
 
 出现以下变化时同步更新本文：
 

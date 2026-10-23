@@ -5,62 +5,65 @@
 
 ## 当前目标
 
-用户确认第二批无问题并要求继续。第二批提交 7431ed6 已推送 main，GitHub Actions 的类型检查、测试、构建、部署全部成功；服务器日志确认 2026-10-21 00:29:03（北京时间）完成发布，当前生产 SHA 为 7431ed609933fc9f561ca1c86af6f76c0891a2cf。
+用户要求把后续重构拆成多窗口任务，并反馈答案之书字体加载慢、先显示默认字体。当前本地已完成字体子集、答案页预加载和可复制的多窗口任务说明；没有创建新窗口、工作树或执行其他重构任务。
 
-第三批本地完成：把借用清单增删、10 台上限、面板/弹窗和提交快照抽至 useBorrowCart；失败保留清单和表单，部分成功只移除本次请求确认借出的设备，保留期间新增选择及改填表单；单台借用成功同步移除对应清单项。用户于 10 月 23 日确认本地测试均无问题并明确要求推送，本轮提交发布第三批和提示居中修复，CI/CD 结果待确认。
+字体由现有 4,586,608 字节 TTF 按全部 16 条答案、引号和空格生成 27,236 字节 WOFF（84 个字符，减少 99.41%）。保留原字形；原 TTF 留作离线生成源，页面改用带指纹的小字体。进入 /answers 即预加载，不等结果文字出现才请求，仍保留 swap 可读兜底，不等待字体才出答案。
 
-10 月 23 日用户回传借用、归还成功提示偏右。已在本地将提示外层改为固定全宽 flex 水平居中，Motion 内层只负责透明度和纵向位移；手机顶部间距沿用原值，背景区域不拦截点击，提示操作保持可点击。用户已确认本地测试无问题，本轮与第三批整体提交推送，自动化检查与发布结果待确认。
+用户已确认本地字体正常，并授权提交推送。正在通过既有 CI/CD 发布；本次结果尚待确认。上一已确认的生产版本为 99d65b1012020eae98613652d72e10e871c27a81，其历史 CI/CD 成功不覆盖当前字体改动。
 
 ## 第一待办
 
-用户已确认第三批及提示居中修复本地测试无问题，并授权推送。整体提交源码、类型、检查和文档，推送 main 后确认本提交的 CI 类型检查、测试、构建及部署结果；发布后由用户人工确认线上借用清单与提示居中。
+推送本批并核对 GitHub Actions 的 verify、deploy 及目标 SHA，完成后由用户刷新生产 /answers 检查字体。用户已反馈本地字体正常；真实慢网耗时未实测。
 
-Agent 按要求不运行本地类型检查、测试、构建或浏览器验证。用户未提供具体测试命令与完整输出，不据此宣称已通过全量自动检查。本轮仅提交发布和更新状态，不新增功能。
+多窗口分工见 docs/REFACTOR_TASKS.md：B 后端分层、C 仓储内部优化可从已提交 99d65b1 在独立工作树并行；A 前端页面/API 拆分等字体修复提交成为共同基线后开始。各窗口不自行推送 main 或部署，由当前窗口整合。
 
 ## 状态快照
 
 | 状态面 | 当前结论 | 证据与范围 |
 | --- | --- | --- |
-| 本地完成 | 前两批已提交发布：Motion 组件注册/入场、类型门禁、独立图片与分类展示逻辑及兜底 | 当前生产 7431ed6；前一批 dc5164d 保留为上一发布版本 |
-| 本地完成 | 第三批新增 useBorrowCart，清单只保存设备 id/name/model，对页面暴露只读摘要列表，修改集中在方法内 | 无 API、个人表单或持久化存储依赖；清单与弹窗按页面实例隔离 |
-| 本地完成 | 批量按设备和表单快照提交，成功只移除本次确认借出的 ID；失败与期间新增选择保留，表单未改填且清单为空才重置 | 单台成功同步移除对应项；单台/批量借用入口均增加 submitting 拦截；移除最后一项收起清单和批量弹窗 |
-| 本地完成 | 借用与归还共用反馈提示拆为固定居中的外层和 Motion 动画内层，避免内联 transform 覆盖原 translateX(-50%) 定位 | 仅改提示定位及模板包装，消息内容、自动消失时长、关闭和答案链接不变；待用户人工确认 |
-| 本地验证 | 第三批及提示定位修复仅做静态差异和同步分类检查；第三批另有七项清单行为回归及页面接线契约 | 用户确认本地测试均无问题，具体命令与完整结果未提供；Agent 未运行本地 typecheck、测试、构建或浏览器检查，本提交待 CI 验证 |
-| 服务器同步 | 第二批已部署新腾讯云，第三批及提示定位修复未提交、推送或部署 | Actions run 39457708892，verify / deploy 均 success；日志 Deployment completed at 7431ed609933fc9f561ca1c86af6f76c0891a2cf |
-| 生产验证 | 第二批自动发布健康检查通过；此前域名 HTTPS、Certbot 续期演练、三个服务 enabled / active 已获用户回传 | 实际生产登录/借还/邮件和第三批交互未由 Agent 操作；用户已确认第二批无问题，具体人工项目未列明 |
+| 本地完成 | 固定答案迁至 content/answer-book-responses.json，页面和字体生成脚本共用文案 | 16 条文字与 HEAD 静态比较一致，抽签和分享行为未改 |
+| 本地完成 | 新字体压缩子集、指纹元数据及答案页专用预加载 | 4,586,608 -> 27,236 字节；原字体家族名称保留；普通借还页不主动预加载答案字体 |
+| 本地完成 | 新字体资源检查，核对文件格式/指纹/体积及答案字符覆盖，防止改文案后遗漏重新生成 | 检查代码已添加，尚未在本地或 CI 运行；生成资产随源码提交，生产不需要 Python |
+| 本地完成 | 三份可直接复制的窗口任务，定义文件归属、固定仓储 API 和整合顺序 | docs/REFACTOR_TASKS.md；仅完成任务划分，不代表其他窗口已开始或完成重构 |
+| 本地验证 | 字体生成后重新读取 WOFF：84 字符无缺失，SHA-256 与元数据相符；固定答案与原列表一致；静态差异检查 | 未运行项目类型检查、测试、构建或自动浏览器；文件体积不是网络耗时测量 |
+| 服务器同步 | 本批未提交、推送或部署；最近确认上线 99d65b1 | Actions run 39919338399，历史 verify/deploy success，发布日志为 2026-10-23 15:41:16 |
+| 生产验证 | 当前字体优化尚未生产验证 | 旧版清单/提示用户确认本地正常且发布健康检查成功；字体需新一轮人工反馈 |
 
-Actions：https://github.com/l0x0hhh/cyb3r/actions/runs/39457708892 。第三批不改服务端借用校验、批量上限、接口或邮件规则，只修正前端选择与表单状态处理。
+## 多窗口边界
 
-## 活跃事项
+- 每个窗口独立 worktree/分支，避免共享目录内同时修改；A 统一负责 main.js、前端页面与 API 拆分。
+- B 仅改 server.js、backend/ 与对应后端检查，C 仅改 db/ 内部实现及仓储检查；均不改 schema、迁移、依赖版本或生产数据。
+- 固定 createSqliteStore 的 databasePath/readCollection/writeCollection/transaction/close，同步调用与完整快照写入语义不变。
+- 各任务正常维护文档与独立交付说明；共享文档由整合窗口统一更新。先 C、后 B，再合 A，检查兼容后统一 CI/CD。
 
-1. 用户已确认第三批本地测试无问题，当前优先确认本次推送的 CI/CD 和线上人工验证。类型检查仍是局部覆盖，既有 main.js 与后端未全面 TypeScript 化。
-2. 后续按页面边界继续拆 main.js 的业务状态、API 与展示组件，避免一次同时更改页面结构和借还规则。
-3. 后端接口、业务服务和数据访问仍待分层；SQLite 全量集合读取/回写问题留专项处理。当前没有修改 server.js、数据库或生产数据。
+## 字体维护
+
+- 文案源：frontend/src/content/answer-book-responses.json；生成信息：同目录 answer-book-font.js。
+- 本地工具 Python + FontTools（本次 4.46.0），命令 python scripts/subset-answer-font.py。生成脚本同步写 WOFF、元数据和 HTML URL，保留名称/版权信息及原 TTF。
+- 修改答案或原字体后重新生成并提交配套资源；64 KiB 字体体积预算和字符覆盖由新检查约束。不要只提交 HTML 而漏字体、文案或预加载模块。
+- 脚本保留旧指纹资产以免删掉其他分支使用的字体；原 TTF 仍为生成源，不是运行时回退资源。
 
 ## 生产环境与发布边界
 
-- 当前生产：腾讯云轻量服务器 43.138.146.44，广州四区，2 核 / 2GB、40GB SSD、3Mbps、200GB/月；Ubuntu 26.04 x86_64，ubuntu 免密 sudo，2GiB Swap。
-- 入口：https://cyb3r.art/borrow 和 https://cyb3r.art/admin；域名 A 已指向新机。
-- 应用 /opt/device-management；服务 device-management；用户 deviceapp；环境配置 /etc/device-management.env；Node.js 22，精确版本以服务器输出为准。
-- 持久化 /var/lib/device-management/data、uploads、qrcodes；SQLite 为 data/device-management.sqlite。代码发布和回退不得覆盖业务数据。
-- 仓库 l0x0hhh/cyb3r，main 检查成功后按 SHA 发布；受限 SSH、Secrets、开关均已配置，本次第二批已从 Actions 日志核实。
-- /usr/local/sbin/device-management-deploy 由 setup-cd.sh 安装，普通前端改动无需重装；自动发布统一以 deviceapp 安装锁定依赖、构建独立版本，再切换/重启/检查。失败尝试恢复上一版代码与依赖，不回退业务数据。
-- 旧腾讯云 106.55.186.151 按迁移流程保持停止；京东云 111.228.27.48 与阿里云 47.119.149.116 为历史中间副本，不能直接切回旧数据库。
+- 腾讯云 43.138.146.44；入口 https://cyb3r.art/borrow、/admin 和 /answers；Node.js 22、Ubuntu 26.04、2 核/2GB。
+- 应用 /opt/device-management；服务 device-management；用户 deviceapp；环境配置 /etc/device-management.env。
+- 持久化 /var/lib/device-management/data、uploads、qrcodes；发布和代码回退不得覆盖业务数据。
+- main 检查成功后按 SHA 发布；统一以 deviceapp 安装锁定依赖、构建独立版本、切换/重启/检查。普通字体更新不重装发布入口，不新增运行依赖，不变更系统配置。
+- 用户已完成本地字体验收并授权推送；本批 CI/CD 结果需单独核实，不能沿用原有 CI 成功。
 
 ## 已知边界
 
-- 第三批没有新增依赖或改系统配置；手动增量需构建，现有 CI/CD 仍统一 npm ci/build/restart。生产数据、证书和环境配置不变。
-- Git SSH 曾未通过主机校验，本次继续使用保留 TLS 校验的 HTTPS 推送，未修改 origin、known_hosts 或全局配置。
-- 普通用户只看到脱敏信息；借出设备不能下线；删除设备必须二次确认，本批不变。
-- 不上传 data/、uploads/、public/qrcodes/、frontend/dist/、node_modules/ 或密钥，不在运行中的生产实例执行占用 3000 端口的集成测试。
+- Agent 不运行本地类型检查、测试、构建或浏览器自动化；页面由用户手动检查。生成/读取字体资产属于本次资源制作和静态核对。
+- 本地 PowerShell Restricted 时用 npm.cmd；前端打开 Vite 的 Local 地址加 /borrow 或 /answers，根地址仅显示占位页。
+- 普通用户脱敏、借出设备不能下线、删除设备二次确认等业务规则不变；不上传生产数据、密钥、构建产物或 node_modules。
 
-## 待发布涉及文件（第三批与提示定位修复）
+## 本批涉及文件
 
-- 修改：frontend/index.html、frontend/src/main.js、frontend/src/types/device.ts、test/frontend-source.test.js。
-- 新增：frontend/src/composables/use-borrow-cart.js、test/borrow-cart.test.js。
-- 文档：docs/CURRENT_STATUS.md、docs/PROJECT_GUIDE.md、docs/CODE_STRUCTURE.md、docs/CHANGELOG.md。
-- AGENTS.md 为用户既有改动，本轮未编辑或提交；未改后端、依赖锁文件、生产数据、发布脚本或构建产物。
+- 修改：frontend/index.html、frontend/src/main.js。
+- 新增：frontend/src/composables/use-answer-font.js、frontend/src/content/answer-book-responses.json、frontend/src/content/answer-book-font.js、public/fonts/answer-book-results-1b8511e63397.woff、scripts/subset-answer-font.py、test/answer-font.test.js。
+- 文档：docs/REFACTOR_TASKS.md、docs/CURRENT_STATUS.md、docs/PROJECT_GUIDE.md、docs/CODE_STRUCTURE.md、docs/CHANGELOG.md。
+- AGENTS.md 为用户既有改动，本轮未编辑。原 TTF、其他字体、后端、数据库、依赖版本与生产文件未改。
 
 ## 新会话接续
 
-先读本卡，再读 PROJECT_GUIDE.md，按第一待办继续；部署时完整阅读 skills/sync-device-management/SKILL.md 与 docs/CI_CD.md。每轮更新本卡及导航，并向 CHANGELOG.md 追加短记录，不把本地完成推断为上线。
+先读本卡，再读 PROJECT_GUIDE.md，按第一待办继续；并行任务先看 REFACTOR_TASKS.md。部署前完整阅读 skills/sync-device-management/SKILL.md 与 docs/CI_CD.md；更新本卡、导航和短历史，区分本地资产核对、项目检查、部署与人工效果验证。
