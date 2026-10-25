@@ -32,6 +32,7 @@ const BorrowPage = {
               <p class="portal-affiliation">暨南大学网络空间安全学院</p>
             </div>
           </div>
+          <a class="system-portal-link" href="/materials"><span>物资借用</span><span aria-hidden="true">↗</span></a>
         </div>
       </header>
       <nav class="portal-tabs" aria-label="借还导航">

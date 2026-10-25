@@ -1,0 +1,51 @@
+/* Larger, layered materials workspace. Keep device administration isolated. */
+.admin-page--materials .admin-nav{border-bottom:1px solid #dae6df;box-shadow:0 5px 24px #193e3010}
+.admin-page--materials .admin-area-card{border-radius:18px;box-shadow:0 5px 20px #193e3008;transition:transform .2s ease,box-shadow .2s ease,background .2s ease}
+.admin-page--materials .admin-area-card small{font-size:14px;line-height:1.6}
+.admin-page--materials .admin-area-card__state{font-size:13px}
+.admin-page--materials .admin-area-card--active{background:linear-gradient(120deg,#e5f0e7,#f5f9ef);box-shadow:inset 0 0 0 1px #28634f,0 8px 24px #214e3b12}
+.admin-page--materials .admin-menu__item{min-height:48px;font-size:16px;border-radius:12px;transition:background .18s ease,transform .18s ease}
+.admin-page--materials .admin-menu__group h2,.admin-page--materials .admin-sidebar__eyebrow{font-size:14px;letter-spacing:.04em}
+.mm-app.mm-app--embedded{font-size:16px;line-height:1.65;color:#263e34;background:linear-gradient(145deg,#edf3ee,#f8faf6 65%);border:1px solid #dce7df;border-radius:22px;box-shadow:0 14px 40px #173e2d09;overflow:visible}
+.mm-app--embedded .mm-content{padding:32px;animation:mm-admin-enter .32s ease both}
+.mm-app--embedded .mm-page-heading{gap:20px;margin-bottom:28px;flex-wrap:wrap}
+.mm-app--embedded .mm-page-heading h1{font-size:32px;line-height:1.25;letter-spacing:-.025em}
+.mm-app--embedded .mm-page-heading p{font-size:16px;line-height:1.7;color:#5c7064}
+.mm-app--embedded .mm-kicker{font-size:12px;letter-spacing:.16em}
+.mm-app--embedded .mm-panel{border:1px solid #dce7df;border-radius:18px;background:#ffffffed;box-shadow:0 6px 22px #193e3008}
+.mm-app--embedded .mm-admin-stats{gap:16px;margin-bottom:26px}
+.mm-app--embedded .mm-admin-stats>div{padding:24px;border-radius:18px;border:1px solid #d9e6dc;background:linear-gradient(135deg,#fff,#f3f8ef);box-shadow:0 6px 20px #214e3b08;transition:transform .2s ease,box-shadow .2s ease}
+.mm-app--embedded .mm-admin-stats strong{font-size:34px;line-height:1.3}
+.mm-app--embedded .mm-admin-stats strong em{font-size:15px;margin-left:6px}
+.mm-app--embedded .mm-admin-stats span,.mm-app--embedded .mm-admin-stats small{font-size:15px;line-height:1.6}
+.mm-app--embedded .mm-table{font-size:16px;line-height:1.65;min-width:820px}
+.mm-app--embedded .mm-table th{font-size:14px;padding:17px 18px;background:#edf4ee;color:#4c6657}
+.mm-app--embedded .mm-table td{padding:18px;vertical-align:middle;border-bottom-color:#e7eee8}
+.mm-app--embedded .mm-table td small,.mm-app--embedded .mm-table-item small{font-size:14px;line-height:1.65;color:#607366;overflow-wrap:anywhere}
+.mm-app--embedded .mm-table-item strong{font-size:16px}
+.mm-app--embedded .mm-table-item img{width:52px;height:52px;border-radius:12px}
+.mm-app--embedded .mm-table tbody tr{transition:background .18s ease}
+.mm-app--embedded .mm-table tbody tr:hover{background:#f4f8f1}
+.mm-app--embedded .mm-table-actions button{font-size:14px;min-height:44px;padding:8px 10px;border-radius:8px}
+.mm-app--embedded .mm-button{font-size:15px!important;min-height:46px;padding:12px 18px;border-radius:12px;transition:transform .18s ease,box-shadow .18s ease,background .18s ease}
+.mm-app--embedded .mm-button:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 6px 16px #214e3b18}
+.mm-app--embedded .mm-button:active:not(:disabled){transform:translateY(0)}
+.mm-app--embedded input,.mm-app--embedded select,.mm-app--embedded textarea{font-size:16px!important;min-height:46px;line-height:1.5;border-radius:10px}
+.mm-app--embedded label{font-size:15px!important;line-height:1.65}
+.mm-app--embedded .mm-badge{font-size:13px;line-height:1.5;padding:5px 10px}
+.mm-app--embedded .mm-panel-title h2,.mm-app--embedded .mm-empty h3{font-size:21px}
+.mm-app--embedded .mm-panel-title p,.mm-app--embedded .mm-note,.mm-app--embedded .mm-entry-tip,.mm-app--embedded .mm-empty p{font-size:15px;line-height:1.8}
+.mm-app--embedded .mm-review-card{padding:26px;margin-bottom:20px}
+.mm-app--embedded .mm-loan-heading strong{font-size:18px}
+.mm-app--embedded .mm-loan-heading small,.mm-app--embedded .mm-review-lines small{font-size:14px;line-height:1.65}
+.mm-app--embedded .mm-review-lines,.mm-app--embedded .mm-location{font-size:15px;line-height:1.8}
+.mm-app--embedded .mm-overlay{z-index:120}
+.mm-app--embedded .mm-modal{padding:32px;border-radius:22px;box-shadow:0 28px 80px #193e3033;animation:mm-admin-enter .24s ease both}
+.mm-app--embedded .mm-modal h2{font-size:27px}
+.mm-app--embedded .mm-modal-subtitle,.mm-app--embedded .mm-modal-footer>span{font-size:15px;line-height:1.7}
+.mm-app--embedded .mm-demo,.mm-app--embedded .mm-toast-message{font-size:14px}
+.mm-app--embedded :is(button,input,select,textarea,a):focus-visible{outline:3px solid #8ab69c;outline-offset:3px}
+@keyframes mm-admin-enter{from{opacity:.35;transform:translateY(9px)}to{opacity:1;transform:translateY(0)}}
+@media(hover:hover){.admin-page--materials .admin-area-card:hover,.mm-app--embedded .mm-admin-stats>div:hover{transform:translateY(-3px);box-shadow:0 12px 28px #214e3b16}.admin-page--materials .admin-menu__item:hover{transform:translateX(3px)}}
+@media(max-width:700px){.mm-app--embedded .mm-content{padding:22px 14px}.mm-app--embedded .mm-page-heading h1{font-size:27px}.mm-app--embedded .mm-admin-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.mm-app--embedded .mm-admin-stats>div{padding:16px}.mm-app--embedded .mm-admin-stats strong{font-size:29px}.mm-app--embedded .mm-modal{padding:26px 18px}.mm-app--embedded .mm-review-card{padding:20px 16px}.admin-page--materials .admin-area-card small{font-size:13px}.mm-app--embedded .mm-table-toolbar{flex-wrap:wrap}.mm-app--embedded .mm-search{width:100%;min-width:0}}
+@media(prefers-reduced-motion:reduce){.admin-page--materials .admin-area-card,.admin-page--materials .admin-menu__item,.mm-app--embedded *{animation:none!important;transition:none!important;scroll-behavior:auto!important}.admin-page--materials .admin-area-card:hover,.admin-page--materials .admin-menu__item:hover,.mm-app--embedded .mm-admin-stats>div:hover,.mm-app--embedded .mm-button:hover{transform:none!important}}

@@ -1,6 +1,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import '../styles/materials.css';
 import '../styles/materials-public.css';
+import '../styles/materials-admin.css';
 import { preference, savePreference } from '../services/preferences.js';
 
 const ICONS = {
@@ -213,7 +214,7 @@ export default {
       <div class="mm-sidebar-bottom"><div class="mm-service-note"><MIcon name="shield"/><strong>{{adminRoute?'账目清楚，交接有据':'免登录，直接借用'}}</strong><p>{{adminRoute?'每次数量变化均有流水可查。':'选择需要的物资，填写信息即可借用。'}}</p></div><a :href="adminRoute?'/materials':'/admin?tab=materials-inventory'"><MIcon :name="adminRoute?'grid':'shield'"/>{{adminRoute?'返回用户端':'管理员入口'}}<MIcon name="arrow"/></a></div>
     </aside>
     <main class="mm-main">
-      <header v-if="!embedded" class="mm-topbar"><div><span>团委物资</span><b>/</b><strong>{{title}}</strong></div><div class="mm-topbar-right"><span class="mm-date">{{today}}</span><span class="mm-online"><i></i>{{demo?'本地演示':'物资服务'}}</span></div></header>
+      <header v-if="!embedded" class="mm-topbar"><div><span>团委物资</span><b>/</b><strong>{{title}}</strong></div><div class="mm-topbar-right"><a class="system-portal-link" href="/borrow"><span>设备借还</span><span aria-hidden="true">↗</span></a><span class="mm-date">{{today}}</span><span class="mm-online"><i></i>{{demo?'本地演示':'物资服务'}}</span></div></header>
 
       <div class="mm-content" :key="page">
         <div v-if="demo" class="mm-demo"><span>本地预览</span>当前物资为虚构演示数据，可放心体验借用、录入和归还流程。</div>

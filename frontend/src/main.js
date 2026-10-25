@@ -4,6 +4,7 @@ import BorrowPage from './pages/BorrowPage.js';
 import AdminPage from './pages/AdminPage.js';
 import AnswersPage from './pages/AnswersPage.js';
 import MaterialsPage from './pages/MaterialsPage.js';
+import './styles/portal-links.css';
 const { createApp } = Vue;
 
 // ==================== 路由 ====================

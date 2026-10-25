@@ -58,7 +58,7 @@ async function loadExcelJS() {
 const AdminPage = {
   components: { MaterialsPage },
   template: `
-    <div class="admin-page">
+    <div class="admin-page" :class="{'admin-page--materials':isLoggedIn && activeArea==='materials'}">
       <!-- 顶部导航 -->
       <nav class="admin-nav">
         <div class="nav-brand">

@@ -1,0 +1,8 @@
+/* Shared cross-portal navigation; normal links preserve browser history. */
+.portal-header__inner{gap:16px;justify-content:space-between}
+a.system-portal-link{display:inline-flex;align-items:center;justify-content:center;gap:12px;min-height:44px;padding:10px 16px;box-sizing:border-box;border:1px solid #b9d2c6;border-radius:14px;background:#f0f7f3;color:#245841;font-size:15px;font-weight:650;line-height:1.4;text-decoration:none;white-space:nowrap;box-shadow:0 3px 10px #214e3b0a;transition:transform .2s ease,box-shadow .2s ease,background .2s ease}
+a.system-portal-link:hover{background:#e1eee6;transform:translateY(-2px);box-shadow:0 7px 18px #214e3b18}
+a.system-portal-link:active{transform:translateY(0)}
+a.system-portal-link:focus-visible{outline:3px solid #568b70;outline-offset:4px}
+@media(max-width:700px){.portal-header__inner{flex-wrap:wrap}.mm-app--public .mm-topbar{height:auto;min-height:72px;padding-top:12px;padding-bottom:12px;flex-wrap:wrap;gap:12px}.mm-app--public .mm-topbar-right{flex-wrap:wrap;gap:10px!important}a.system-portal-link{font-size:14px;padding:9px 12px;gap:8px}}
+@media(prefers-reduced-motion:reduce){a.system-portal-link{transition:none;transform:none}}
