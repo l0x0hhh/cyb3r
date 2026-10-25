@@ -1,4 +1,4 @@
-# CI only: no production credentials or deployment jobs.
+# CI only: verify pull requests and main branch changes without deploying.
 name: CI
 
 on:
