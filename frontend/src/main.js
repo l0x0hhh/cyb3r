@@ -3,13 +3,15 @@ import * as Vue from 'vue';
 import BorrowPage from './pages/BorrowPage.js';
 import AdminPage from './pages/AdminPage.js';
 import AnswersPage from './pages/AnswersPage.js';
+import MaterialsPage from './pages/MaterialsPage.js';
 const { createApp } = Vue;
 
 // ==================== 路由 ====================
 const path = window.location.pathname;
 const isBorrowPage = path === '/borrow' || path === '/borrow/';
-const isAdminPage = path === '/admin' || path === '/admin/';
+const isAdminPage = path === '/admin' || path === '/admin/' || /^\/materials\/admin\/?$/.test(path);
 const isAnswersPage = path === '/answers' || path === '/answers/';
+const isMaterialsPage = /^\/materials\/?$/.test(path);
 
 // ==================== 创建应用 ====================
 const app = createApp({
@@ -17,22 +19,25 @@ const app = createApp({
     const isAdmin = Vue.ref(isAdminPage);
     const isBorrow = Vue.ref(isBorrowPage);
     const isAnswers = Vue.ref(isAnswersPage);
+    const isMaterials = Vue.ref(isMaterialsPage);
 
     // 监听 popstate 处理浏览器前进后退
     Vue.onMounted(() => {
       window.addEventListener('popstate', () => {
         const p = window.location.pathname;
         isBorrow.value = p === '/borrow' || p === '/borrow/';
-        isAdmin.value = p === '/admin' || p === '/admin/';
+        isAdmin.value = p === '/admin' || p === '/admin/' || /^\/materials\/admin\/?$/.test(p);
         isAnswers.value = p === '/answers' || p === '/answers/';
+        isMaterials.value = /^\/materials\/?$/.test(p);
       });
     });
 
-    return { isAdmin, isBorrow, isAnswers };
+    return { isAdmin, isBorrow, isAnswers, isMaterials };
   },
 
   template: `
-    <BorrowPage v-if="isBorrow" />
+    <MaterialsPage v-if="isMaterials" />
+    <BorrowPage v-else-if="isBorrow" />
     <AdminPage v-else-if="isAdmin" />
     <AnswersPage v-else-if="isAnswers" />
     <div v-else class="redirect-page">
@@ -45,7 +50,7 @@ const app = createApp({
     </div>
   `,
 
-  components: { BorrowPage, AdminPage, AnswersPage }
+  components: { BorrowPage, AdminPage, AnswersPage, MaterialsPage }
 });
 
 app.mount('#app');

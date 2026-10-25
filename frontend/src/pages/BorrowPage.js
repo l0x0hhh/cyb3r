@@ -9,6 +9,7 @@ import { loadBorrowFireworks } from '../services/borrow-fireworks.js';
 import { apiCall } from '../services/api.js';
 import { useSiteFooter } from '../composables/use-site-footer.js';
 import { formatDate } from '../utils/date.js';
+import { preference, savePreference } from '../services/preferences.js';
 
 // 瀑布流列数与页面断点保持一致，避免 CSS 多列自动平衡造成空列。
 function getWaterfallColumnCount() {
@@ -162,6 +163,15 @@ const BorrowPage = {
         </section>
 
         <section v-else class="portal-section">
+          <section class="portal-visitor-records" aria-label="本浏览器借用记录">
+            <div class="portal-section__heading"><h2>本浏览器的借用记录</h2><button type="button" class="btn btn--ghost btn--sm" @click="loadVisitorRecords">刷新</button></div>
+            <p>自动记住此浏览器借用的设备，归还仍需在下方核对姓名和手机号。</p>
+            <p v-if="!visitorRecords.length">暂无关联记录。其他浏览器或升级前的借用，请使用下方查询。</p>
+            <article v-for="record in visitorRecords" :key="record.recordId" class="portal-visitor-record">
+              <div><strong>{{record.deviceName}}</strong><small>{{record.borrowerName}} · {{record.borrowerPhone}} · {{formatDate(record.createdAt)}}</small></div>
+              <span>{{record.returnedAt?'已归还':'待归还'}}</span>
+            </article>
+          </section>
           <div class="portal-section__heading portal-section__heading--stack">
             <h2>查询待归还设备</h2>
             <p>请输入借用时填写的完整手机号和姓名，只会显示你的借用记录。</p>
@@ -393,8 +403,8 @@ const BorrowPage = {
         </div>
         <!-- 备案号与运行时长合并为一行底栏元信息，减少页脚视觉占用。 -->
         <div class="page-footer__meta">
-          <a class="page-footer__filing-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">豫ICP备2026040615号-1</a>
-          <span class="page-footer__meta-separator" aria-hidden="true">·</span>
+          <a v-if="filingNumber" class="page-footer__filing-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">{{ filingNumber }}</a>
+          <span v-if="filingNumber" class="page-footer__meta-separator" aria-hidden="true">·</span>
           <span class="page-footer__runtime">{{ siteRuntime }}</span>
         </div>
       </footer>
@@ -402,14 +412,18 @@ const BorrowPage = {
   `,
 
   setup() {
-    const { siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping } = useSiteFooter();
+    const { filingNumber, siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping } = useSiteFooter();
     // Motion 自动读取系统减少动态效果设置，所有新增动效在该模式下保持静态。
     const prefersReducedMotion = useReducedMotion();
     const initialDeviceId = new URLSearchParams(window.location.search).get('id');
-    const activeMode = Vue.ref('borrow');
+    const activeMode = Vue.ref(initialDeviceId ? 'borrow' : preference('deviceMode','borrow'));
     const availableDevices = Vue.ref([]);
     const searchQuery = Vue.ref('');
-    const activeCategory = Vue.ref('');
+    const activeCategory = Vue.ref(preference('deviceCategory',''));
+    const visitorRecords = Vue.ref([]);
+    async function loadVisitorRecords() { try { const res=await apiCall('GET','/api/visitor/records'); if(res.success) visitorRecords.value=res.data; } catch {} }
+    Vue.watch(activeMode, value=>{ savePreference('deviceMode',value); if(value==='return') loadVisitorRecords(); });
+    Vue.watch(activeCategory, value=>savePreference('deviceCategory',value));
     const categories = Vue.ref([]);
     const devicePresentation = useDevicePresentation(categories);
     const filteredDevices = Vue.computed(() => {
@@ -829,6 +843,7 @@ const BorrowPage = {
       }
       window.addEventListener('popstate', handlePopState);
       window.addEventListener('resize', updateWaterfallColumnCount);
+      if(activeMode.value==='return') loadVisitorRecords();
       apiCall('GET', '/api/categories').then(res => { if (res.success) categories.value = res.data; });
     });
     Vue.onBeforeUnmount(() => {
@@ -840,12 +855,12 @@ const BorrowPage = {
     });
 
     return {
-      activeMode, availableDevices, filteredDevices, deviceColumns, searchQuery, activeCategory, categories, loadingDevices, selectedDeviceId, device, currentBorrower,
+      activeMode, visitorRecords, loadVisitorRecords, availableDevices, filteredDevices, deviceColumns, searchQuery, activeCategory, categories, loadingDevices, selectedDeviceId, device, currentBorrower,
        detailLoading, noDevice, showBorrowForm, showOtherBorrowForm, submitting, returningRecordId, returnSearched,
       returnResults, returnToken, returnNotes, form, returnLookup,
       ...devicePresentation,
        deviceStatusText, deviceStatusClass, isMobileDetailLayout, openDevice, closeDevice, finishCloseDevice, switchMode, doBorrow, doOtherBorrow,
-      lookupReturns, doReturn, formatDate, siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping,
+      lookupReturns, doReturn, formatDate, filingNumber, siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping,
       MAX_BATCH_BORROW, borrowCart, showBorrowCart, showBatchBorrowForm, isInCart, toggleCartDevice, clearBorrowCart, openBatchBorrowForm, doBatchBorrow,
       returnSelected, batchReturnNotes, returnSelectedCount, toggleReturnSelect, toggleSelectAllReturns, doBatchReturn,
       actionFeedback, clearActionFeedback, prefersReducedMotion

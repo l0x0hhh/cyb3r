@@ -104,5 +104,5 @@ function useHitokoto() {
 export function useSiteFooter() {
   const siteRuntime = useSiteRuntime();
   const { hitokotoText, hitokotoUrl, isHitokotoTyping } = useHitokoto();
-  return { siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping };
+  return { filingNumber: import.meta.env.VITE_ICP_NUMBER || '', siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping };
 }
