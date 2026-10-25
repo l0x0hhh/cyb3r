@@ -30,7 +30,7 @@ test('pages share transport, footer and date tools without sharing business stat
     assert.match(page, /import \{ apiCall \} from '\.\.\/services\/api\.js'/);
     assert.match(page, /import \{ useSiteFooter \} from '\.\.\/composables\/use-site-footer\.js'/);
     assert.match(page, /import \{ formatDate \} from '\.\.\/utils\/date\.js'/);
-    assert.match(page, /setup\(\)\s*\{\s*const \{ siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping \} = useSiteFooter\(\)/);
+    assert.match(page, /setup\(\)\s*\{\s*const \{ filingNumber, siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping \} = useSiteFooter\(\)/);
     assert.doesNotMatch(page, /(?:async )?function apiCall\(|function formatDate\(/);
   }
   assert.match(footerSource, /export function useSiteFooter\(\)/);
@@ -195,14 +195,16 @@ test('public and administrator pages identify the JNU Cyber Security School', ()
 });
 
 // ICP备案号与运行时长合并为底栏元信息行，备案号仍链接到工信部备案官网。
-test('public and administrator footers expose the service ICP filing number', () => {
+test('public and administrator footers show only a configured filing number', () => {
   const filingMeta = source.match(/class="page-footer__meta"/g) || [];
   const filingLinks = source.match(/href="https:\/\/beian\.miit\.gov\.cn\/"/g) || [];
   const filingSeparators = source.match(/class="page-footer__meta-separator"/g) || [];
   assert.equal(filingMeta.length, 2);
   assert.equal(filingLinks.length, 2);
   assert.equal(filingSeparators.length, 2);
-  assert.equal((source.match(/豫ICP备2026040615号-1/g) || []).length, 2);
+  assert.equal((source.match(/{{ filingNumber }}/g) || []).length, 2);
+  assert.match(footerSource, /import\.meta\.env\.VITE_ICP_NUMBER/);
+  assert.equal((source.match(/v-if="filingNumber" class="page-footer__filing-link"/g) || []).length, 2);
   assert.match(source, /page-footer__filing-link[\s\S]*?page-footer__meta-separator[\s\S]*?page-footer__runtime/);
   assert.doesNotMatch(source, /class="page-footer__filing"/);
 

@@ -132,7 +132,9 @@ test('frontend entry assembles standalone runtime-template pages with the existi
     assert.ok(page.includes(`export default ${pageName};`));
   }
   assert.doesNotMatch(entry, /apiCall|fetch\(|useSiteFooter|const (?:BorrowPage|AdminPage|AnswersPage)\s*=/);
-  assert.match(entry, /components:\s*\{ BorrowPage, AdminPage, AnswersPage \}/);
+  assert.match(entry, /components:\s*\{ BorrowPage, AdminPage, AnswersPage, MaterialsPage \}/);
+  assert.ok(entry.includes("import MaterialsPage from './pages/MaterialsPage.js'"));
+  assert.ok(entry.includes('<MaterialsPage v-if="isMaterials" />'));
   assert.match(entry, /app\.mount\('#app'\)/);
 });
 

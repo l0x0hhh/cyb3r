@@ -62,8 +62,8 @@ visudo -cf "${sudoers_temp}"
 install -o root -g root -m 0440 "${sudoers_temp}" /etc/sudoers.d/device-management-cd
 
 printf '\nCI/CD entry installed. The current application was not restarted.\n'
-printf 'DEPLOY_HOST = 43.138.146.44\nDEPLOY_USER = device-deploy (fixed in workflow)\n'
+printf 'DEPLOY_HOST = server.example.com\nDEPLOY_USER = device-deploy (fixed in workflow)\n'
 printf '\nDEPLOY_KNOWN_HOSTS (copy this public line into GitHub secret):\n'
-awk '{print "43.138.146.44 " $1 " " $2}' /etc/ssh/ssh_host_ed25519_key.pub
+awk -v host="${DEPLOY_HOST:?Set DEPLOY_HOST to your server hostname}" '{print host " " $1 " " $2}' /etc/ssh/ssh_host_ed25519_key.pub
 printf '\nServer host fingerprint:\n'
 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub

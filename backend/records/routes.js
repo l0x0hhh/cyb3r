@@ -1,20 +1,23 @@
 // 借还路由装配：复用同一个限流器，完整记录接口仍先执行 records 权限检查。
 const express = require('express');
 
-function createRecordRouter({ service, borrowReturnLimiter, requireAdminPermission }) {
+function createRecordRouter({ service, borrowReturnLimiter, requireAdminPermission, onBorrow = () => {} }) {
   const router = express.Router();
   router.post('/borrow', borrowReturnLimiter, (req, res) => {
     const result = service.borrow(req.body);
+    if (result.body.success && result.body.data?.id) onBorrow(req, [result.body.data.id]);
     res.status(result.status).json(result.body);
   });
 
   router.post('/borrow-other', borrowReturnLimiter, (req, res) => {
     const result = service.borrowOther(req.body);
+    if (result.body.success && result.body.data?.id) onBorrow(req, [result.body.data.id]);
     res.status(result.status).json(result.body);
   });
 
   router.post('/borrow-batch', borrowReturnLimiter, (req, res) => {
     const result = service.borrowBatch(req.body);
+    if (result.body.success) onBorrow(req, (result.body.data?.borrowed || []).map(item=>item.recordId));
     res.status(result.status).json(result.body);
   });
 

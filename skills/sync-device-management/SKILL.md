@@ -5,12 +5,12 @@ description: Inspect completed changes in the college device-management project 
 
 # Sync Device Management
 
-Generate deployment instructions for this project without requiring the user to restate its server layout. Keep all production mutations within the files changed by the current task.
+Generate deployment instructions for this project using the actual server layout supplied for that deployment. Keep all production mutations within the files changed by the current task.
 
 ## Project constants
 
-- Local project: `E:\AIstudy\设备管理`
-- SSH target: `ubuntu@43.138.146.44`
+- Local project: `<project-directory>`
+- SSH target: `ubuntu@server.example.com`
 - Application directory: `/opt/device-management`
 - Service user: `deviceapp`
 - systemd service: `device-management`
@@ -21,15 +21,9 @@ Generate deployment instructions for this project without requiring the user to 
 
 Never include passwords or personal borrowing data in commands or artifacts.
 
-## Automatic deployment (preferred after initial activation)
+## Deployment boundary
 
-Read `docs/CI_CD.md` for the current setup. `.github/workflows/ci.yml` verifies PRs and main; when repository variable `CD_ENABLED=true`, a successful main push or manual main run deploys that exact SHA to the new Tencent server. Initial server installation, two GitHub repository secrets and activation are still required until user-confirmed. Do not assume these are configured because the files exist locally.
-
-The release entry is root-owned `/usr/local/sbin/device-management-deploy <full-SHA>`, installed by `deploy/setup-cd.sh`. It fetches the read-only repository, prepares a separate release with `deviceapp` npm ci/build, switches `/opt/device-management` to the release, restarts once, and checks HTTP/API. Failed switching or health checks attempt to restore the previous code and dependencies, never old business data. It does not automatically update its own installed entry or apply live `/etc` configuration.
-
-After activation, ordinary delivery instructions should name the changed files, ask the user to stage the intended changes, push main, and inspect both CI and deployment results. Do not recommend Git merge/pull inside the live application: release directories contain archived source without `.git`. Every new release installs locked dependencies and builds before switching, including backend-only changes; the incremental action table below applies to the manual fallback, not release preparation.
-
-Manual file installation remains an explicit fallback while automation is disabled. For user-visible verification, honor the user's no-local-build instruction and manual browser policy; record checks not run rather than claiming success. Never run production tests while port 3000 is in use. Publishing a change to the release tooling requires a separate reviewed reinstallation using setup-cd.sh.
+This public repository runs verification CI only. Configure your own server, read-only repository key and root-owned release entry before using the optional deployment helpers. Never assume any host is already configured. Back up databases, uploads and environment files before a release. Do not run integration tests against a live production service.
 
 ## Workflow
 
@@ -115,7 +109,7 @@ Lead with the deployment decision, then provide:
 7. Persistent-data safety note.
 8. Any live system-configuration step that still needs explicit authorization.
 
-Do not ask the user to repeat server IP, paths, service name, or persistent directories already recorded here.
+Confirm deployment-specific paths from the actual environment; examples here do not identify an existing server.
 
 ## Classifier script
 

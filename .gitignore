@@ -30,3 +30,20 @@ miniprogram/.git/
 
 # Local archive artifacts.
 *.tar.gz
+
+# Private configuration, database snapshots, credentials and publication artifacts.
+miniprogram/project.private.config.json
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.pem
+*.key
+*.p12
+*.pfx
+*.zip
+*.bak
+*.backup
+.admin-password*
+backups/
+release-manifest.json

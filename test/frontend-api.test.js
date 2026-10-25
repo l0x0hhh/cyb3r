@@ -32,7 +32,7 @@ test('API keeps the URL, JSON body and current session on each request', async t
   assert.strictEqual(await apiCall('POST', '/api/records/borrow-batch', body), partialResult);
   assert.deepEqual(calls[0], {
     url: '/api/records/borrow-batch',
-    options: { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': session }, body: JSON.stringify(body) }
+    options: { method: 'POST', credentials:'same-origin', headers: { 'Content-Type': 'application/json', 'x-session-id': session }, body: JSON.stringify(body) }
   });
   session = 'test-session-next';
   await apiCall('GET', '/api/admin/check');

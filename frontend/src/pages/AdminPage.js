@@ -4,6 +4,9 @@ import { useReducedMotion } from 'motion-v';
 import { apiCall } from '../services/api.js';
 import { useSiteFooter } from '../composables/use-site-footer.js';
 import { formatDate } from '../utils/date.js';
+import MaterialsPage from './MaterialsPage.js';
+import '../styles/admin-areas.css';
+import { preference, savePreference } from '../services/preferences.js';
 
 // 批量工作簿共用同一组中文列定义，避免模板、预览和导出字段漂移。
 const DEVICE_IMPORT_COLUMNS = [
@@ -53,6 +56,7 @@ async function loadExcelJS() {
 }
 
 const AdminPage = {
+  components: { MaterialsPage },
   template: `
     <div class="admin-page">
       <!-- 顶部导航 -->
@@ -60,7 +64,7 @@ const AdminPage = {
         <div class="nav-brand">
           <picture><source srcset="/assets/jnu-cyber-security-emblem.webp" type="image/webp" /><img class="nav-emblem" src="/assets/jnu-cyber-security-emblem.png" width="38" height="38" alt="暨南大学网络空间安全学院院徽" loading="eager" decoding="async" /></picture>
           <div class="nav-brand__copy">
-            <span class="nav-brand__title">设备管理后台</span>
+            <span class="nav-brand__title">学院管理后台</span>
             <small class="nav-affiliation">暨南大学网络空间安全学院</small>
           </div>
         </div>
@@ -91,11 +95,17 @@ const AdminPage = {
       </div>
 
       <div v-else class="admin-layout">
+        <div class="admin-area-switcher" role="group" aria-label="切换管理系统">
+          <button v-for="area in availableAreas" :key="area.key" type="button" :class="['admin-area-card', {'admin-area-card--active':activeArea===area.key}]" :aria-pressed="activeArea===area.key" @click="selectAdminArea(area.key)">
+            <span class="admin-area-card__icon" aria-hidden="true">{{area.icon}}</span><span><strong>{{area.label}}</strong><small>{{area.description}}</small></span><span class="admin-area-card__state">{{activeArea===area.key?'当前管理区':'进入管理区'}}</span>
+          </button>
+        </div>
+        <div v-if="!visibleTabs.length" class="empty-state"><p>当前账号尚未分配管理权限，请联系超级管理员。</p></div>
         <div class="admin-shell">
           <!-- 桌面端分组侧栏，移动端复用为抽屉；菜单仍由服务端权限过滤。 -->
           <aside class="admin-sidebar" :class="{ 'admin-sidebar--collapsed': adminNavigationCollapsed }">
             <div class="admin-sidebar__header">
-              <span class="admin-sidebar__eyebrow">工作台</span>
+              <span class="admin-sidebar__eyebrow">{{activeAreaLabel}}</span>
               <button class="admin-sidebar__collapse" type="button" title="收起导航" aria-label="收起导航" @click="toggleAdminNavigation"><span class="admin-sidebar__chevron" aria-hidden="true"></span></button>
             </div>
             <nav class="admin-menu" aria-label="管理后台导航">
@@ -115,7 +125,7 @@ const AdminPage = {
           </transition>
           <transition name="admin-drawer" :css="!prefersReducedMotion">
           <aside v-if="adminDrawerOpen" class="admin-drawer" :class="{ 'admin-drawer--open': adminDrawerOpen }" aria-label="移动端导航">
-            <div class="admin-drawer__header"><strong>管理导航</strong><button type="button" class="modal-close" aria-label="关闭导航" @click="toggleAdminDrawer">×</button></div>
+            <div class="admin-drawer__header"><strong>{{activeAreaLabel}}</strong><button type="button" class="modal-close" aria-label="关闭导航" @click="toggleAdminDrawer">×</button></div>
             <nav class="admin-menu">
               <section v-for="group in visibleNavigationGroups" :key="group.key" class="admin-menu__group">
                 <h2>{{ group.label }}</h2>
@@ -126,6 +136,7 @@ const AdminPage = {
           </transition>
           <div class="admin-main">
             <button type="button" class="admin-mobile-menu-button" title="打开导航" aria-label="打开导航" @click="toggleAdminDrawer">☰</button>
+            <MaterialsPage v-if="activeArea==='materials' && visibleTabs.some(tab=>tab.key===activeTab)" embedded :section="activeTab.slice(10)" :admin-user="adminUser" @navigate="selectMaterialSection" @session-expired="expireAdminSession" />
 
         <!-- 超级管理员专属账号管理面板：普通管理员不会看到该入口。 -->
         <transition name="admin-tab" :css="!prefersReducedMotion">
@@ -857,7 +868,7 @@ const AdminPage = {
             </div>
             <div v-if="!editingAdmin" class="form-group">
               <label>初始密码 <span class="required">*</span></label>
-              <input v-model="adminForm.password" type="password" class="input" autocomplete="new-password" placeholder="至少 8 位" />
+              <input v-model="adminForm.password" type="password" class="input" autocomplete="new-password" placeholder="至少 12 位" />
             </div>
             <div class="form-group">
               <label>功能权限</label>
@@ -889,7 +900,7 @@ const AdminPage = {
           </div>
           <div class="modal-body">
             <div class="form-group"><label>原密码 <span class="required">*</span></label><input v-model="passwordForm.currentPassword" type="password" class="input" autocomplete="current-password" /></div>
-            <div class="form-group"><label>新密码 <span class="required">*</span></label><input v-model="passwordForm.newPassword" type="password" class="input" autocomplete="new-password" placeholder="至少 8 位" /></div>
+            <div class="form-group"><label>新密码 <span class="required">*</span></label><input v-model="passwordForm.newPassword" type="password" class="input" autocomplete="new-password" placeholder="至少 12 位" /></div>
             <div class="form-group"><label>确认新密码 <span class="required">*</span></label><input v-model="passwordForm.confirmPassword" type="password" class="input" autocomplete="new-password" /></div>
             <p v-if="passwordMessage" class="login-error" :class="{ 'email-settings-message--success': passwordMessageSuccess }">{{ passwordMessage }}</p>
           </div>
@@ -976,8 +987,8 @@ const AdminPage = {
           </div>
           <!-- 管理端与用户端共用同一底栏元信息层级，保持入口体验一致。 -->
           <div class="page-footer__meta">
-            <a class="page-footer__filing-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">豫ICP备2026040615号-1</a>
-            <span class="page-footer__meta-separator" aria-hidden="true">·</span>
+            <a v-if="filingNumber" class="page-footer__filing-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">{{ filingNumber }}</a>
+            <span v-if="filingNumber" class="page-footer__meta-separator" aria-hidden="true">·</span>
             <span class="page-footer__runtime">{{ siteRuntime }}</span>
           </div>
         </footer>
@@ -986,7 +997,7 @@ const AdminPage = {
   `,
 
   setup() {
-    const { siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping } = useSiteFooter();
+    const { filingNumber, siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping } = useSiteFooter();
     const prefersReducedMotion = useReducedMotion();
     const isLoggedIn = Vue.ref(false);
     // 登录身份由服务端返回，前端只据此展示入口，真正权限仍由后端校验。
@@ -1001,7 +1012,8 @@ const AdminPage = {
       const records = Vue.ref([]);
       const activeRecords = Vue.ref([]);
       const archivedRecords = Vue.ref([]);
-      const activeTab = Vue.ref('devices');
+      const requestedTab = new URLSearchParams(window.location.search).get('tab');
+      const activeTab = Vue.ref(requestedTab || (window.location.pathname.replace(/\/$/, '') === '/materials/admin' ? 'materials-inventory' : preference('adminTab','devices')));
       const adminUsers = Vue.ref([]);
       const showAdminModal = Vue.ref(false);
       const editingAdmin = Vue.ref(null);
@@ -1137,7 +1149,7 @@ const AdminPage = {
       const emailSettingsSaving = Vue.ref(false);
       const emailSettingsTesting = Vue.ref(false);
       // 设备视图属于当前浏览器偏好，不写入设备数据或服务端配置。
-      const deviceViewMode = Vue.ref(localStorage.getItem('adminDeviceViewMode') === 'list' ? 'list' : 'card');
+      const deviceViewMode = Vue.ref(preference('adminDeviceViewMode',localStorage.getItem('adminDeviceViewMode') === 'list' ? 'list' : 'card'));
       const showAddDevice = Vue.ref(false);
       const showEditDevice = Vue.ref(false);
       // 批量状态选择是页面临时状态，成功或关闭后清空，不影响设备持久化模型。
@@ -1225,6 +1237,7 @@ const AdminPage = {
       if (!['card', 'list'].includes(mode)) return;
       deviceViewMode.value = mode;
       localStorage.setItem('adminDeviceViewMode', mode);
+      savePreference('adminDeviceViewMode',mode);
     }
 
     let pendingImageFile = null;
@@ -1232,8 +1245,10 @@ const AdminPage = {
 
     // 常用管理入口靠前，低频统计和日志统一放在分类管理之后。
     const permissionOptions = [
-      { key: 'devices', label: '设备管理' },
-      { key: 'records', label: '借用记录' },
+      { key: 'devices', label: '设备管理 · 库存' },
+      { key: 'records', label: '设备管理 · 借还记录' },
+      { key: 'materials-inventory', label: '物资管理 · 库存及入库审核' },
+      { key: 'materials-records', label: '物资管理 · 借还及核销审核' },
       { key: 'categories', label: '分类管理' },
       { key: 'statistics', label: '借用统计' },
       { key: 'operation-logs', label: '操作日志' },
@@ -1244,6 +1259,12 @@ const AdminPage = {
       { key: 'records', label: '当前借出', icon: '📤', permission: 'records' },
       { key: 'all-records', label: '全部记录', icon: '📜', permission: 'records' },
       { key: 'archived', label: '已归档', icon: '🗄️', permission: 'records' },
+      { key: 'materials-inventory', label: '物资库存', icon: '📦', permission: 'materials-inventory' },
+      { key: 'materials-entry', label: '新增物资', icon: '➕', permission: 'materials-inventory' },
+      { key: 'materials-loans', label: '物资借用记录', icon: '📑', permission: 'materials-records' },
+      { key: 'materials-returns', label: '归还与核销', icon: '✅', permission: 'materials-records' },
+      { key: 'materials-entries', label: '入库审核', icon: '📥', permission: 'materials-inventory' },
+      { key: 'materials-ledger', label: '物资库存流水', icon: '🔎', permission: 'materials-inventory' },
       { key: 'categories', label: '分类管理', icon: '🏷️', permission: 'categories' },
       { key: 'statistics', label: '借用统计', icon: '📊', permission: 'statistics' },
       { key: 'operation-logs', label: '操作日志', icon: '🧾', permission: 'operation-logs' },
@@ -1252,29 +1273,61 @@ const AdminPage = {
     ];
     const isSuperAdmin = Vue.computed(() => adminUser.value?.role === 'super_admin');
     const visibleTabs = Vue.computed(() => tabs.filter(tab => isSuperAdmin.value || adminUser.value?.permissions?.includes(tab.permission)));
+    const areaForTab = key => key.startsWith('materials-') ? 'materials' : key === 'admin-management' ? 'accounts' : 'devices';
+    const activeArea = Vue.computed(() => areaForTab(activeTab.value));
+    const areas = [
+      { key:'devices', label:'设备管理', icon:'🖥️', description:'设备台账、借还与设备设置' },
+      { key:'materials', label:'物资管理', icon:'📦', description:'物资库存、入库与消耗核销' },
+      { key:'accounts', label:'账号管理', icon:'👥', description:'共用管理员账号与权限' }
+    ];
+    const availableAreas = Vue.computed(() => areas.filter(area => visibleTabs.value.some(tab=>areaForTab(tab.key)===area.key)));
+    const activeAreaLabel = Vue.computed(() => areas.find(area=>area.key===activeArea.value)?.label || '管理后台');
+    const lastAreaTabs = {};
+    function selectAdminArea(area) {
+      const options=visibleTabs.value.filter(tab=>areaForTab(tab.key)===area);
+      const target=options.find(tab=>tab.key===lastAreaTabs[area]) || options[0];
+      if(target) selectAdminTab(target.key);
+    }
     // 按管理员权限加载受保护数据，避免普通管理员产生无意义的 403 请求。
     function hasAdminPermission(permission) {
       return isSuperAdmin.value || adminUser.value?.permissions?.includes(permission);
     }
     const navigationGroups = [
       { key: 'operations', label: '运营管理', items: tabs.filter(tab => ['devices', 'records', 'all-records', 'archived'].includes(tab.key)) },
+      { key: 'materials', label: '物资管理', items: tabs.filter(tab => tab.key.startsWith('materials-')) },
       { key: 'configuration', label: '配置管理', items: tabs.filter(tab => ['categories', 'email-notifications'].includes(tab.key)) },
       { key: 'analytics', label: '数据分析', items: tabs.filter(tab => ['statistics', 'operation-logs'].includes(tab.key)) },
       { key: 'system', label: '系统设置', items: tabs.filter(tab => tab.key === 'admin-management') }
     ];
     const visibleNavigationGroups = Vue.computed(() => navigationGroups
-      .map(group => ({ ...group, items: group.items.filter(item => visibleTabs.value.some(tab => tab.key === item.key)) }))
+      .map(group => ({ ...group, items: group.items.filter(item => areaForTab(item.key)===activeArea.value && visibleTabs.value.some(tab => tab.key === item.key)) }))
       .filter(group => group.items.length));
-    const adminNavigationCollapsed = Vue.ref(localStorage.getItem('adminNavigationCollapsed') === 'true');
+    const adminNavigationCollapsed = Vue.ref(preference('adminNavigationCollapsed',localStorage.getItem('adminNavigationCollapsed') === 'true'));
     const adminDrawerOpen = Vue.ref(false);
     function toggleAdminNavigation() {
       adminNavigationCollapsed.value = !adminNavigationCollapsed.value;
       localStorage.setItem('adminNavigationCollapsed', String(adminNavigationCollapsed.value));
+      savePreference('adminNavigationCollapsed',adminNavigationCollapsed.value);
     }
     function toggleAdminDrawer() { adminDrawerOpen.value = !adminDrawerOpen.value; }
     function selectAdminTab(key) {
+      if (!visibleTabs.value.some(tab => tab.key === key)) return;
+      lastAreaTabs[activeArea.value] = activeTab.value;
       activeTab.value = key;
+      savePreference('adminTab',key);
       adminDrawerOpen.value = false;
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', key);
+      url.searchParams.set('area', activeArea.value);
+      window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    }
+    function selectMaterialSection(section) { selectAdminTab(`materials-${section}`); }
+    function expireAdminSession() {
+      localStorage.removeItem('sessionId');
+      sessionStorage.removeItem('materials_admin_session');
+      isLoggedIn.value = false;
+      adminUser.value = null;
+      loginError.value = '登录已失效，请重新登录';
     }
     Vue.watch(visibleTabs, nextTabs => {
       if (nextTabs.length && !nextTabs.some(tab => tab.key === activeTab.value)) activeTab.value = nextTabs[0].key;
@@ -1293,7 +1346,8 @@ const AdminPage = {
       try {
         const res = await apiCall('POST', '/api/admin/login', { username: username.value || 'admin', password: password.value });
         if (res.success) {
-          localStorage.setItem('sessionId', res.sessionId);
+          localStorage.removeItem('sessionId');
+          sessionStorage.removeItem('materials_admin_session');
           adminUser.value = res.user || null;
           isLoggedIn.value = true;
           password.value = '';
@@ -1312,14 +1366,21 @@ const AdminPage = {
     async function doLogout() {
       await apiCall('POST', '/api/admin/logout');
       localStorage.removeItem('sessionId');
+      sessionStorage.removeItem('materials_admin_session');
       isLoggedIn.value = false;
       adminUser.value = null;
     }
 
     async function loadData() {
+      // 每个管理区仅加载自己的业务数据；物资由MaterialsPage负责。
+      if (activeArea.value === 'materials') return;
+      if (activeArea.value === 'accounts') { if(isSuperAdmin.value) await loadAdminUsers(); return; }
+      const skipped = Promise.resolve({success:false, skipped:true});
       const requests = await Promise.all([
-        apiCall('GET', '/api/devices'), apiCall('GET', '/api/records?includeDeleted=true'), apiCall('GET', '/api/records/active'),
-        apiCall('GET', '/api/categories'),
+        hasAdminPermission('devices') ? apiCall('GET', '/api/devices') : skipped,
+        hasAdminPermission('records') ? apiCall('GET', '/api/records?includeDeleted=true') : skipped,
+        hasAdminPermission('records') ? apiCall('GET', '/api/records/active') : skipped,
+        hasAdminPermission('categories') || hasAdminPermission('devices') ? apiCall('GET', '/api/categories') : skipped,
         hasAdminPermission('operation-logs') ? apiCall('GET', '/api/operation-logs') : Promise.resolve({ success: false, skipped: true }),
         hasAdminPermission('email-settings') ? apiCall('GET', '/api/admin/email-settings') : Promise.resolve({ success: false, skipped: true })
       ]);
@@ -1334,9 +1395,9 @@ const AdminPage = {
       if (cRes.success) categories.value = cRes.data;
       if (lRes.success) operationLogs.value = lRes.data;
       if (eRes.success) applyEmailSettings(eRes.data);
-      if (adminUser.value?.role === 'super_admin') await loadAdminUsers();
       if (adminUser.value?.role === 'super_admin' || adminUser.value?.permissions?.includes('statistics')) await loadStatistics();
     }
+    Vue.watch(activeArea, () => { if(isLoggedIn.value) loadData(); });
 
     // 管理员管理请求统一在超级管理员界面触发，避免普通管理员无意义地调用接口。
     async function loadAdminUsers() {
@@ -1421,6 +1482,9 @@ const AdminPage = {
           passwordForm.currentPassword = '';
           passwordForm.newPassword = '';
           passwordForm.confirmPassword = '';
+          closePasswordModal();
+          expireAdminSession();
+          loginError.value = '密码已修改，请使用新密码重新登录';
         }
       } catch { passwordMessage.value = '网络错误，密码未修改'; }
       finally { passwordSaving.value = false; }
@@ -2379,10 +2443,14 @@ const AdminPage = {
 
     // 页面加载时向后端校验 session 是否仍有效
     Vue.onMounted(async () => {
-      const sid = localStorage.getItem('sessionId');
-      if (!sid) return;
+      document.title = '学院管理后台 · 网络空间安全学院';
+      // Cookie会话跨浏览器重开及服务重启保持；旧令牌仅用于升级接续。
+      const sid = localStorage.getItem('sessionId') || sessionStorage.getItem('materials_admin_session');
+      if (sid) localStorage.setItem('sessionId', sid);
+      sessionStorage.removeItem('materials_admin_session');
       try {
         const res = await apiCall('GET', '/api/admin/check');
+        localStorage.removeItem('sessionId');
         if (res.success && res.isAdmin) {
           adminUser.value = res.user || null;
           username.value = res.user?.username || username.value;
@@ -2392,7 +2460,7 @@ const AdminPage = {
           localStorage.removeItem('sessionId'); // 失效则清掉
         }
       } catch (e) {
-        // 网络错误时保持未登录，让用户重新登录
+      // 网络错误不清除服务器会话，稍后可重新检查。
       }
     });
 
@@ -2407,13 +2475,13 @@ const AdminPage = {
       showBatchCategory, batchCategoryId, batchCategoryError,
       deviceImportColumns: DEVICE_IMPORT_COLUMNS, showDeviceImport, deviceImportInput, deviceImportFileName,
       deviceImportFileError, deviceImportPreview, deviceImportErrorCount,
-      activeTab, tabs, visibleTabs, visibleNavigationGroups, adminNavigationCollapsed, adminDrawerOpen, categories, deviceViewMode, showAddDevice, showEditDevice, editingDevice, editingRecord, imageInput,
+      activeTab, activeArea, activeAreaLabel, availableAreas, selectAdminArea, tabs, visibleTabs, visibleNavigationGroups, adminNavigationCollapsed, adminDrawerOpen, categories, deviceViewMode, showAddDevice, showEditDevice, editingDevice, editingRecord, imageInput,
       adminUsers, showAdminModal, editingAdmin, adminSaving, adminForm, adminFormError, permissionOptions, adminManagementMessage, adminManagementError,
       showPasswordModal, passwordForm, passwordSaving, passwordMessage, passwordMessageSuccess,
       cropEditor, cropDisplayHeight, cropDisplayPositionY, cropSelectionStyle, cropShadeTopStyle, cropShadeBottomStyle,
       doLogin, doLogout, loadData, statisticsRange, statisticsLoading, statisticsError, loadStatistics, setStatisticsRange,
       openAddAdmin, openEditAdminPermissions, closeAdminModal, saveAdmin, deleteAdmin, permissionLabelsFor, changePassword, closePasswordModal,
-      toggleAdminNavigation, toggleAdminDrawer, selectAdminTab,
+      toggleAdminNavigation, toggleAdminDrawer, selectAdminTab, selectMaterialSection, expireAdminSession,
       operationLogActionLabel, operationLogActionClass,
       downloadDeviceImportTemplate, openDeviceImport, closeDeviceImport, handleDeviceImportFile, submitDeviceImport, exportDevices,
       toggleDeviceSelection, clearDeviceSelection, closeMobileDeviceTools,
@@ -2430,7 +2498,7 @@ const AdminPage = {
       showAddCategory, newCategoryName, editingCategory,
       categoryDragId, categoryDragOverId, startCategoryDrag, dragOverCategory, dropCategory, finishCategoryDrag,
       addCategory, updateCategory, deleteCategory, startEditCategory, saveEmailSettings, sendEmailTest,
-      siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping
+      filingNumber, siteRuntime, hitokotoText, hitokotoUrl, isHitokotoTyping
     };
   }
 };

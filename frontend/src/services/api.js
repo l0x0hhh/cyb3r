@@ -2,7 +2,7 @@
 const API_BASE = '';
 
 export async function apiCall(method, url, body) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  const opts = { method, credentials:'same-origin', headers: { 'Content-Type': 'application/json' } };
   const sessionId = localStorage.getItem('sessionId');
   if (sessionId) opts.headers['x-session-id'] = sessionId;
 
