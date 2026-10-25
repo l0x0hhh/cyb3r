@@ -27,24 +27,8 @@ test('CI validates CommonJS syntax and validates the ESM frontend through Vite',
   assert.match(workflow, /run: npm run build/);
 });
 
-test('production deployment is gated by successful main CI and explicit initial enablement', () => {
+test('public CI has no deployment job or production credentials', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
-  const deploy = workflow.slice(workflow.indexOf('  deploy:'));
-  assert.match(deploy, /needs: verify/);
-  assert.match(deploy, /github\.ref == 'refs\/heads\/main'/);
-  assert.match(deploy, /github\.event_name == 'push'/);
-  assert.match(deploy, /github\.event_name == 'workflow_dispatch'/);
-  assert.match(deploy, /vars\.CD_ENABLED == 'true'/);
-  assert.match(deploy, /cancel-in-progress: false/);
-  assert.doesNotMatch(workflow, /pull_request_target/);
-  assert.doesNotMatch(workflow.slice(0, workflow.indexOf('  deploy:')), /secrets\./);
-});
-
-test('deployment uses the verified SHA with strict host verification and no password shell', () => {
-  const workflow = fs.readFileSync(workflowPath, 'utf8');
-  assert.match(workflow, /"deploy \$GITHUB_SHA"/);
-  assert.match(workflow, /StrictHostKeyChecking=yes/);
-  assert.match(workflow, /BatchMode=yes/);
-  assert.match(workflow, /device-deploy@/);
-  assert.doesNotMatch(workflow, /StrictHostKeyChecking=no|sshpass|curl[^\n]*\|\s*(?:sudo\s+)?bash/);
+  assert.doesNotMatch(workflow, /secrets\.|ssh |DEPLOY_HOST|pull_request_target|  deploy:/);
+  assert.match(workflow, /contents: read/);
 });
