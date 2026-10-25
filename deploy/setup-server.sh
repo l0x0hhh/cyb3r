@@ -88,10 +88,13 @@ BASE_URL="http://${DOMAIN}"
 
 log "写入生产环境配置"
 umask 077
+ADMIN_PASSWORD_HASH="$(printf '%s' "${ADMIN_PASSWORD}" | node -e 'const fs=require("node:fs");const {hashAdminPassword}=require("./backend/passwords");process.stdout.write(hashAdminPassword(fs.readFileSync(0,"utf8")))')"
+EMAIL_CONFIG_KEY="$(openssl rand -base64 32)"
 cat > "${ENV_FILE}" <<EOF
 NODE_ENV=production
 PORT=3000
-ADMIN_PASSWORD=${ADMIN_PASSWORD}
+ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH}
+EMAIL_CONFIG_KEY=${EMAIL_CONFIG_KEY}
 APP_BASE_URL=${BASE_URL}
 TRUST_PROXY=true
 DATA_DIR=${PERSIST_DIR}/data
@@ -100,7 +103,7 @@ QR_DIR=${PERSIST_DIR}/qrcodes
 EOF
 chown root:"${RUN_USER}" "${ENV_FILE}"
 chmod 640 "${ENV_FILE}"
-unset ADMIN_PASSWORD
+unset ADMIN_PASSWORD ADMIN_PASSWORD_HASH EMAIL_CONFIG_KEY
 
 log "注册并启动 systemd 服务"
 cat > "${SERVICE_FILE}" <<EOF

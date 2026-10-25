@@ -345,6 +345,15 @@ test('privacy and administrator record-management contract', async t => {
     assert.equal(result.response.status, 200);
     assert.equal(result.body.success, true);
 
+    const expired = await request('/api/admin/check', { headers:{'x-session-id':sessionId} });
+    assert.equal(expired.body.isAdmin,false);
+    const relogin = await request('/api/admin/login', {
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:'admin',password:'new-test-secret'})
+    });
+    assert.equal(relogin.body.success,true);
+    sessionId=relogin.body.sessionId;
+
     const mismatch = await request('/api/admin/password', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },

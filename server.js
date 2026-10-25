@@ -14,11 +14,15 @@ const { createRecordService } = require('./backend/records/service');
 const { createRecordRouter } = require('./backend/records/routes');
 const { createAdminPermissions } = require('./backend/middleware/admin-permissions');
 const { getRecordMajor, getRecordPurpose } = require('./backend/records/validation');
+const { createMaterialsStore } = require('./backend/materials/store');
+const { createMaterialsRouter } = require('./backend/materials/routes');
+const { createSiteState, siteCookies } = require('./backend/site-state');
+const {hashAdminPassword,hashAdminPasswordAsync,verifyAdminPassword,passwordFormat} = require('./backend/passwords');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const APP_BASE_URL = String(process.env.APP_BASE_URL || '').trim().replace(/\/+$/, '');
-if (process.env.TRUST_PROXY === 'true') app.set('trust proxy', 1);
+if (process.env.TRUST_PROXY === 'true') app.set('trust proxy', 'loopback');
 const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(__dirname, 'data');
@@ -34,8 +38,8 @@ const STATIC_DIR = fs.existsSync(path.join(FRONTEND_DIST_DIR, 'index.html'))
   ? FRONTEND_DIST_DIR
   : FRONTEND_SOURCE_DIR;
 
-if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_PASSWORD) {
-  throw new Error('生产环境必须设置 ADMIN_PASSWORD');
+if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_PASSWORD && !passwordFormat(process.env.ADMIN_PASSWORD_HASH)) {
+  throw new Error('生产环境必须设置有效的 ADMIN_PASSWORD_HASH（兼容 ADMIN_PASSWORD）');
 }
 
 const PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
@@ -194,6 +198,8 @@ app.use(helmet({
   contentSecurityPolicy: { directives: cspDirectives },
   strictTransportSecurity: usingHttps ? undefined : false
 }));
+// 批量导入使用独立且有上限的JSON大小，其他接口保持原32KB限制。
+app.use('/api/v2/admin/import', express.json({ limit: '512kb' }));
 app.use(express.json({ limit: '32kb' }));
 app.use(express.urlencoded({ extended: true, limit: '32kb' }));
 app.use('/uploads', express.static(UPLOAD_DIR, {
@@ -323,8 +329,8 @@ function writeJSON(filePath, data) {
 
 // 管理员账户模型：超级管理员拥有全部功能，普通管理员使用明确的权限白名单。
 const ADMIN_USERNAME = String(process.env.ADMIN_USERNAME || 'admin').trim() || 'admin';
-const ADMIN_PERMISSION_KEYS = ['devices', 'records', 'categories', 'statistics', 'operation-logs', 'email-settings', 'admin-management'];
-const ADMIN_PASSWORD_MIN_LENGTH = 8;
+const ADMIN_PERMISSION_KEYS = ['devices', 'records', 'categories', 'statistics', 'operation-logs', 'email-settings', 'admin-management', 'materials-inventory', 'materials-records'];
+const ADMIN_PASSWORD_MIN_LENGTH = 12;
 
 function normalizeAdminUsername(value) {
   return String(value || '').trim().toLowerCase();
@@ -335,19 +341,7 @@ function normalizeAdminPermissions(value) {
   return [...new Set(list.map(item => String(item || '').trim()).filter(item => ADMIN_PERMISSION_KEYS.includes(item)))];
 }
 
-function hashAdminPassword(password) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const derived = crypto.scryptSync(String(password), salt, 64);
-  return `scrypt$${salt}$${derived.toString('hex')}`;
-}
-
-function verifyAdminPassword(password, encodedHash) {
-  const [algorithm, salt, encoded] = String(encodedHash || '').split('$');
-  if (algorithm !== 'scrypt' || !salt || !encoded || !/^[a-f0-9]{128}$/i.test(encoded)) return false;
-  const expected = Buffer.from(encoded, 'hex');
-  const actual = crypto.scryptSync(String(password), salt, expected.length);
-  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
-}
+const dummyPasswordHash=hashAdminPassword(crypto.randomBytes(32).toString('hex'));
 
 function toPublicAdminUser(user) {
   return {
@@ -386,7 +380,7 @@ function ensureAdminUsers() {
     normalized.push({
       id: 'admin-root',
       username: normalizeAdminUsername(ADMIN_USERNAME),
-      passwordHash: hashAdminPassword(PASSWORD),
+      passwordHash: passwordFormat(process.env.ADMIN_PASSWORD_HASH) ? process.env.ADMIN_PASSWORD_HASH : hashAdminPassword(PASSWORD),
       role: 'super_admin',
       permissions: [...ADMIN_PERMISSION_KEYS],
       createdAt: now,
@@ -1008,26 +1002,27 @@ function getSessionAdminUser(req) {
 }
 
 // ==================== session 简易实现 ====================
-const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-const sessions = new Map();
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const siteState = createSiteState(path.join(DATA_DIR, 'site-state.sqlite'));
+process.once('exit', () => siteState.close());
+app.use(siteCookies);
 app.use((req, res, next) => {
-  const sid = req.headers['x-session-id'];
-  const session = sid ? sessions.get(sid) : null;
-  if (session && session.expiresAt > Date.now()) {
+  const session = siteState.getSession(req.adminToken, getAdminUserById);
+  if (session) {
     req.session = session;
+    if (req.headers['x-session-id']) res.cookie('ccs_admin', req.adminToken, {httpOnly:true,sameSite:'lax',secure:req.secure,path:'/',maxAge:session.expiresAt-Date.now()});
   } else {
-    if (sid) sessions.delete(sid);
     req.session = {};
+    if (req.adminToken) res.clearCookie('ccs_admin', { httpOnly:true, sameSite:'lax', secure:req.secure, path:'/' });
   }
   next();
 });
 
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 10,
+  windowMs: 60 * 1000,
+  limit: 60,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
-  skipSuccessfulRequests: true,
   message: { success: false, message: '登录尝试过于频繁，请稍后再试' }
 });
 
@@ -1732,31 +1727,64 @@ const recordService = createRecordService({
   appendOperationLog, getDeviceImageFields, getOperationalStatus
 });
 app.use('/api/records', createRecordRouter({
-  service: recordService, borrowReturnLimiter, requireAdminPermission
+  service: recordService, borrowReturnLimiter, requireAdminPermission,
+  onBorrow: (req, ids) => { try { siteState.attach(req.siteVisitorHash, ids); } catch { console.error('访客记录关联暂时不可用，借用已完成'); } }
+}));
+app.get('/api/visitor/records', (req, res) => {
+  const ids = new Set(siteState.records(req.siteVisitorHash));
+  const records = readJSON(RECORDS_FILE).filter(record=>ids.has(record.id) && !record.deletedAt);
+  res.json({success:true, data:records.map(record=>({recordId:record.id, deviceName:record.deviceName, deviceModel:record.deviceModel,
+    borrowerName:maskName(record.borrowerName), borrowerPhone:maskPhone(record.borrowerPhone), createdAt:record.createdAt, returnedAt:record.returnedAt || null}))});
+});
+
+// 数量物资模块独立持久化；不改动或迁移原设备与历史借还表。
+const materialsStore = createMaterialsStore({
+  databasePath: path.join(DATA_DIR, 'materials.sqlite'),
+  demo: process.env.MATERIALS_DEMO === 'true'
+});
+process.once('exit', () => materialsStore.close());
+app.use('/api/v2', createMaterialsRouter({
+  store: materialsStore, requireAdminPermission, upload, validateUploadedImage, optimizeUploadedImage,
+  demo: process.env.MATERIALS_DEMO === 'true'
 }));
 
 // ==================== 管理后台认证 ====================
-app.post('/api/admin/login', loginLimiter, (req, res) => {
-  const password = String(req.body?.password || '');
+app.post('/api/admin/login', loginLimiter, async (req, res, next) => { try {
+  const password = typeof req.body?.password==='string' ? req.body.password : '';
   const username = normalizeAdminUsername(req.body?.username || ADMIN_USERNAME);
+  const retryAfter=siteState.loginStatus(username,req.ip);
+  if(retryAfter) return res.set('Retry-After',String(retryAfter)).status(429).json({success:false,message:'登录尝试过多，请稍后重试',retryAfter});
+  if(username.length>32 || Buffer.byteLength(password)>1024) return res.status(400).json({success:false,message:'账号或密码格式不正确'});
   const user = getAdminUserByUsername(username);
-  if (user && verifyAdminPassword(password, user.passwordHash)) {
-    const sid = crypto.randomBytes(16).toString('hex');
-    sessions.set(sid, {
-      isAdmin: true,
-      adminUserId: user.id,
-      loginAt: new Date().toISOString(),
-      expiresAt: Date.now() + SESSION_TTL_MS
-    });
+  const hashBeforeVerification=user?.passwordHash;
+  const verified=await verifyAdminPassword(password,hashBeforeVerification || dummyPasswordHash);
+  // 异步哈希期间别的请求可能刚刚触发锁定，发放会话前再次确认。
+  const blocked=siteState.loginStatus(username,req.ip);
+  if(blocked) return res.set('Retry-After',String(blocked)).status(429).json({success:false,message:'登录尝试过多，请稍后重试',retryAfter:blocked});
+  if (user && verified && getAdminUserById(user.id)===user && user.passwordHash===hashBeforeVerification) {
+    if(passwordFormat(user.passwordHash)?.legacy) {
+      const upgradedHash=await hashAdminPasswordAsync(password);
+      if(user.passwordHash!==hashBeforeVerification || getAdminUserById(user.id)!==user) return res.status(401).json({success:false,message:'账号或密码错误'});
+      user.passwordHash=upgradedHash;
+      persistAdminUsers();siteState.revokeUser(user.id);
+    }
+    const finalBlocked=siteState.loginStatus(username,req.ip);
+    if(finalBlocked) return res.set('Retry-After',String(finalBlocked)).status(429).json({success:false,message:'登录尝试过多，请稍后重试',retryAfter:finalBlocked});
+    siteState.loginSuccess(username,req.ip);
+    siteState.revoke(req.adminToken);
+    const sid = crypto.randomBytes(32).toString('hex');
+    siteState.createSession(sid, user, SESSION_TTL_MS);
+    res.cookie('ccs_admin', sid, { httpOnly:true, sameSite:'lax', secure:req.secure, path:'/', maxAge:SESSION_TTL_MS });
     res.json({ success: true, sessionId: sid, user: toPublicAdminUser(user) });
   } else {
-    res.json({ success: false, message: '密码错误' });
+    siteState.loginFailure(username,req.ip);
+    res.status(401).json({ success: false, message: '账号或密码错误' });
   }
-});
+} catch(error) {next(error);} });
 
 app.post('/api/admin/logout', (req, res) => {
-  const sid = req.headers['x-session-id'];
-  if (sid) sessions.delete(sid);
+  siteState.revoke(req.adminToken);
+  res.clearCookie('ccs_admin', { httpOnly:true, sameSite:'lax', secure:req.secure, path:'/' });
   res.json({ success: true });
 });
 
@@ -1771,15 +1799,15 @@ app.get('/api/admin/users', requireSuperAdmin, (req, res) => {
   res.json({ success: true, data: ADMIN_USERS.map(toPublicAdminUser) });
 });
 
-app.post('/api/admin/users', requireSuperAdmin, (req, res) => {
+app.post('/api/admin/users', requireSuperAdmin, async (req, res, next) => {try {
   const username = normalizeAdminUsername(req.body?.username);
-  const password = String(req.body?.password || '');
+  const password = typeof req.body?.password==='string' ? req.body.password : '';
   const permissions = normalizeAdminPermissions(req.body?.permissions);
   if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username)) {
     return res.status(400).json({ success: false, message: '用户名需为 3-32 位字母、数字、点、下划线或短横线' });
   }
-  if (password.length < ADMIN_PASSWORD_MIN_LENGTH) {
-    return res.status(400).json({ success: false, message: `密码至少需要 ${ADMIN_PASSWORD_MIN_LENGTH} 位` });
+  if (password.length < ADMIN_PASSWORD_MIN_LENGTH || Buffer.byteLength(password)>1024) {
+    return res.status(400).json({ success: false, message: `密码至少需要 ${ADMIN_PASSWORD_MIN_LENGTH} 位，且不超过1024字节` });
   }
   if (getAdminUserByUsername(username)) return res.status(409).json({ success: false, message: '用户名已存在' });
 
@@ -1787,7 +1815,7 @@ app.post('/api/admin/users', requireSuperAdmin, (req, res) => {
   const user = {
     id: `admin-${crypto.randomBytes(8).toString('hex')}`,
     username,
-    passwordHash: hashAdminPassword(password),
+    passwordHash: await hashAdminPasswordAsync(password),
     role: 'admin',
     permissions,
     createdAt: now,
@@ -1796,7 +1824,7 @@ app.post('/api/admin/users', requireSuperAdmin, (req, res) => {
   ADMIN_USERS.push(user);
   persistAdminUsers();
   res.status(201).json({ success: true, data: toPublicAdminUser(user), message: '管理员已创建' });
-});
+} catch(error) {next(error);} });
 
 app.put('/api/admin/users/:id/permissions', requireSuperAdmin, (req, res) => {
   const user = getAdminUserById(req.params.id);
@@ -1815,36 +1843,46 @@ app.delete('/api/admin/users/:id', requireSuperAdmin, (req, res) => {
   const index = ADMIN_USERS.findIndex(item => item.id === user.id);
   ADMIN_USERS.splice(index, 1);
   persistAdminUsers();
-  for (const [sid, session] of sessions.entries()) {
-    if (session.adminUserId === user.id) sessions.delete(sid);
-  }
+  siteState.revokeUser(user.id);
   res.json({ success: true, message: '管理员已删除' });
 });
 
-app.put('/api/admin/password', checkAdmin, (req, res) => {
+app.put('/api/admin/password', checkAdmin, async (req, res, next) => {try {
   const user = getSessionAdminUser(req);
-  const currentPassword = String(req.body?.currentPassword || '');
-  const newPassword = String(req.body?.newPassword || '');
-  const confirmPassword = String(req.body?.confirmPassword || '');
-  if (!user || !verifyAdminPassword(currentPassword, user.passwordHash)) {
+  const hashBeforeVerification=user?.passwordHash;
+  const retryAfter=siteState.loginStatus(user?.id || '',req.ip,'password-change');
+  if(retryAfter) return res.set('Retry-After',String(retryAfter)).status(429).json({success:false,message:'原密码验证失败过多，请稍后重试',retryAfter});
+  const currentPassword = typeof req.body?.currentPassword==='string' ? req.body.currentPassword : '';
+  const newPassword = typeof req.body?.newPassword==='string' ? req.body.newPassword : '';
+  const confirmPassword = typeof req.body?.confirmPassword==='string' ? req.body.confirmPassword : '';
+  if (!user || !await verifyAdminPassword(currentPassword, hashBeforeVerification)) {
+    siteState.loginFailure(user?.id || '',req.ip,'password-change');
     return res.status(400).json({ success: false, message: '原密码错误' });
   }
   if (newPassword !== confirmPassword) {
     return res.status(400).json({ success: false, message: '两次输入的新密码不一致' });
   }
-  if (newPassword.length < ADMIN_PASSWORD_MIN_LENGTH) {
+  if (newPassword.length < ADMIN_PASSWORD_MIN_LENGTH || Buffer.byteLength(newPassword)>1024) {
     return res.status(400).json({ success: false, message: `新密码至少需要 ${ADMIN_PASSWORD_MIN_LENGTH} 位` });
   }
-  if (verifyAdminPassword(newPassword, user.passwordHash)) {
+  if (await verifyAdminPassword(newPassword, user.passwordHash)) {
     return res.status(400).json({ success: false, message: '新密码不能与原密码相同' });
   }
-  user.passwordHash = hashAdminPassword(newPassword);
+  const newHash=await hashAdminPasswordAsync(newPassword);
+  if(user.passwordHash!==hashBeforeVerification || getAdminUserById(user.id)!==user) return res.status(409).json({success:false,message:'账号状态已变化，请重新登录'});
+  user.passwordHash = newHash;
   user.updatedAt = new Date().toISOString();
   persistAdminUsers();
+  siteState.loginSuccess(user.id,req.ip,'password-change');
+  siteState.revokeUser(user.id);
+  res.clearCookie('ccs_admin', { httpOnly:true, sameSite:'lax', secure:req.secure, path:'/' });
   res.json({ success: true, message: '密码已修改' });
-});
+} catch(error) {next(error);} });
 
 // ==================== 前端页面 ====================
+app.get(['/materials', '/materials/admin'], (req, res) => {
+  res.sendFile(path.join(STATIC_DIR, 'index.html'));
+});
 // 借还页面（用户扫码进入）
 app.get('/borrow', (req, res) => {
   res.sendFile(path.join(STATIC_DIR, 'index.html'));
@@ -1862,24 +1900,29 @@ app.get('/admin', (req, res) => {
 
 // 根路径
 app.get('/', (req, res) => {
-  res.redirect('/borrow');
+  res.redirect(process.env.MATERIALS_PORTAL === 'true' ? '/materials' : '/borrow');
 });
 
 app.use((err, req, res, next) => {
+  res.set('Cache-Control','no-store');
   if (err instanceof multer.MulterError || ['INVALID_IMAGE_TYPE', 'IMAGE_PROCESSING_FAILED'].includes(err.code)) {
     // 统一上传错误提示，避免 Multer 的英文默认信息暴露给管理员。
     const message = err.code === 'LIMIT_FILE_SIZE' ? '图片不能超过 20 MB' : err.message;
     return res.status(400).json({ success: false, message });
   }
-  next(err);
+  if(err.type==='entity.parse.failed') return res.status(400).json({success:false,message:'请求内容格式错误'});
+  if(err.type==='entity.too.large') return res.status(413).json({success:false,message:'请求内容过大'});
+  console.error('请求处理失败',String(err.code || err.name || 'Error').slice(0,80));
+  res.status(500).json({success:false,message:'服务暂时不可用，请稍后重试'});
 });
 
 // 启动服务
-app.listen(PORT, () => {
+app.listen(PORT, process.env.HOST || (process.env.NODE_ENV === 'production' ? '127.0.0.1' : undefined), () => {
   console.log(`\n🚀 设备管理系统已启动！`);
   console.log(`\n  用户借还页面: http://localhost:${PORT}/borrow`);
   console.log(`  管理后台:     http://localhost:${PORT}/admin`);
-  if (!process.env.ADMIN_PASSWORD) {
+  console.log(`  团委物资门户: http://localhost:${PORT}/materials`);
+  if (!process.env.ADMIN_PASSWORD && !process.env.ADMIN_PASSWORD_HASH) {
     console.warn('\n⚠️  当前使用开发默认密码；部署前请设置 ADMIN_PASSWORD 环境变量。\n');
   }
 });
