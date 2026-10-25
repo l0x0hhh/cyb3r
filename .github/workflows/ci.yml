@@ -1,4 +1,4 @@
-# CI/CD：Action 使用 Node 24 运行时，项目选择最新 Node 22 补丁，检查通过后精确发布。
+# CI only: verify pull requests and main branch changes without deploying.
 name: CI
 
 on:
@@ -47,41 +47,3 @@ jobs:
 
       - name: Build frontend
         run: npm run build
-
-  deploy:
-    needs: verify
-    if: >-
-      github.ref == 'refs/heads/main' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-      vars.CD_ENABLED == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    concurrency:
-      group: device-management-production
-      cancel-in-progress: false
-    steps:
-      - name: Deploy verified commit to Tencent Cloud
-        shell: bash
-        env:
-          DEPLOY_HOST: ${{ vars.DEPLOY_HOST || '43.138.146.44' }}
-          DEPLOY_PRIVATE_KEY: ${{ secrets.DEPLOY_PRIVATE_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: |
-          set -Eeuo pipefail
-          test -n "$DEPLOY_PRIVATE_KEY" || { echo 'Missing DEPLOY_PRIVATE_KEY'; exit 1; }
-          test -n "$DEPLOY_KNOWN_HOSTS" || { echo 'Missing DEPLOY_KNOWN_HOSTS'; exit 1; }
-          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]
-          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
-          ssh_dir=$(mktemp -d "$RUNNER_TEMP/device-cd.XXXXXX")
-          trap 'rm -rf -- "$ssh_dir"' EXIT
-          chmod 700 "$ssh_dir"
-          printf '%s\n' "$DEPLOY_PRIVATE_KEY" > "$ssh_dir/key"
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
-          chmod 600 "$ssh_dir/key" "$ssh_dir/known_hosts"
-          ssh -T -i "$ssh_dir/key" \
-            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
-            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
-            "device-deploy@$DEPLOY_HOST" "deploy $GITHUB_SHA"
-          printf '### Production deployment command succeeded\nCommit: `%s`\nTarget: `%s`\nSee SSH log for deployed/already-current/stale status.\n' \
-            "$GITHUB_SHA" "$DEPLOY_HOST" >> "$GITHUB_STEP_SUMMARY"
