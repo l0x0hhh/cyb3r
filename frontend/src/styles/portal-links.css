@@ -1,8 +1,13 @@
 /* Shared cross-portal navigation; normal links preserve browser history. */
-.portal-header__inner{gap:16px;justify-content:space-between}
+.portal-tabs{grid-template-columns:repeat(3,minmax(0,1fr))}
+.portal-tabs .portal-tab--materials{display:flex;align-items:center;justify-content:center;gap:5px;min-width:0;text-decoration:none;color:#356b64}
+.portal-tabs .portal-tab--materials span{font-size:13px;line-height:1;transition:transform .2s ease}
+.portal-tabs .portal-tab--materials:hover{background:rgba(255,253,248,.7);color:var(--brand-deep)}
+.portal-tabs .portal-tab--materials:hover span{transform:translate(2px,-2px)}
+.portal-tabs .portal-tab--materials:focus-visible{outline:3px solid #568b70;outline-offset:-3px}
 a.system-portal-link{display:inline-flex;align-items:center;justify-content:center;gap:12px;min-height:44px;padding:10px 16px;box-sizing:border-box;border:1px solid #b9d2c6;border-radius:14px;background:#f0f7f3;color:#245841;font-size:15px;font-weight:650;line-height:1.4;text-decoration:none;white-space:nowrap;box-shadow:0 3px 10px #214e3b0a;transition:transform .2s ease,box-shadow .2s ease,background .2s ease}
 a.system-portal-link:hover{background:#e1eee6;transform:translateY(-2px);box-shadow:0 7px 18px #214e3b18}
 a.system-portal-link:active{transform:translateY(0)}
 a.system-portal-link:focus-visible{outline:3px solid #568b70;outline-offset:4px}
-@media(max-width:700px){.portal-header__inner{flex-wrap:wrap}.mm-app--public .mm-topbar{height:auto;min-height:72px;padding-top:12px;padding-bottom:12px;flex-wrap:wrap;gap:12px}.mm-app--public .mm-topbar-right{flex-wrap:wrap;gap:10px!important}a.system-portal-link{font-size:14px;padding:9px 12px;gap:8px}}
-@media(prefers-reduced-motion:reduce){a.system-portal-link{transition:none;transform:none}}
+@media(max-width:700px){.mm-app--public .mm-topbar{height:auto;min-height:72px;padding-top:12px;padding-bottom:12px;flex-wrap:wrap;gap:12px}.mm-app--public .mm-topbar-right{flex-wrap:wrap;gap:10px!important}a.system-portal-link{font-size:14px;padding:9px 12px;gap:8px}.portal-tabs{padding-inline:12px}.portal-tabs .portal-tab{font-size:14px}}
+@media(prefers-reduced-motion:reduce){a.system-portal-link,.portal-tabs .portal-tab--materials span{transition:none;transform:none}.portal-tabs .portal-tab--materials:hover span{transform:none}}
