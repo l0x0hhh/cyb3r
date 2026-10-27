@@ -133,6 +133,14 @@
 .mm-app--public .mm-material-bottom strong { font-size: 32px; font-weight: 600; }
 .mm-app--public .mm-material-bottom .mm-outstanding { flex-basis: 100%; margin-left: 0; font-size: 12px; color: #7c876f; }
 .mm-app--public .mm-add { width: 46px; height: 46px; margin-left: auto; border-radius: 15px; background: linear-gradient(135deg, #397351, #225841); color: #fff; border: 1px solid #ffffff45; box-shadow: inset 0 1px 0 #ffffff38, 0 5px 12px -5px #20583c70; transition: transform .2s, background .2s, box-shadow .2s; }
+.mm-app--public .mm-add--label { display: inline-flex; align-items: center; justify-content: center; gap: 3px; width: auto; min-width: 76px; padding: 0 10px; font-size: 14px; font-weight: 650; white-space: nowrap; }
+.mm-app--public .mm-material-bottom > .mm-quantity { display: grid; grid-template-columns: 44px minmax(30px, 1fr) 44px; align-items: center; gap: 0; flex-basis: 100%; min-width: 0; margin-top: 8px; padding: 3px; background: #edf4e8; border: 1px solid #d3e3cc; border-radius: 14px; }
+.mm-app--public .mm-quantity button { display: grid; place-items: center; min-width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 10px; background: #fff; color: #245841; font-size: 24px; line-height: 1; }
+.mm-app--public .mm-quantity button:nth-of-type(2) { background: #28634f; color: #fff; }
+.mm-app--public .mm-quantity button, .mm-app--public .mm-add--label { touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.mm-app--public .mm-quantity-hint { grid-column: 1 / -1; padding: 4px 2px 2px; text-align: center; color: #5b7356; font-size: 12px; line-height: 1.5; }
+.mm-app--public .mm-quantity button:disabled { opacity: .45; }
+.mm-app--public .mm-quantity output { text-align: center; color: #245841; font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
 .mm-app--public .mm-add:active { transform: scale(.92); }
 .mm-app--public .mm-unavailable { font-size: 18px; color: #405441; }
 .mm-app--public .mm-empty { padding: 62px 26px; gap: 16px; border-radius: 24px; background: #ffffff80; border-color: #cbd9c1; color: #62785a; }
@@ -193,6 +201,7 @@
 .mm-app--public .mm-normal-confirm { min-height: 44px; border-radius: 10px; }
 .mm-app--public .mm-cart-bar { left: calc(50% + 145px); bottom: 24px; min-width: 550px; max-width: calc(100% - 350px); padding: 17px 20px; border-radius: 23px; background: #f9fff4ee; border: 1px solid #fff; box-shadow: 0 18px 50px #204c3530, inset 0 1px 0 white; animation: mm-public-appear .2s both; }
 .mm-app--public .mm-cart-bar strong { font-size: 17px; }
+.mm-app--public .mm-cart-bar > div { min-width: 0; }
 .mm-app--public .mm-cart-bar small { font-size: 13px; color: #6c815e; }
 .mm-app--public .mm-cart-icon { padding: 13px; border-radius: 14px; }
 .mm-app--public .mm-cart-icon b { font-size: 12px; min-width: 20px; height: 20px; }
@@ -329,6 +338,7 @@
   .mm-app--public .mm-material-bottom small, .mm-app--public .mm-material-bottom > div > span { font-size: 12px; }
   .mm-app--public .mm-material-bottom strong { font-size: 28px; }
   .mm-app--public .mm-add { width: 44px; height: 44px; border-radius: 13px; }
+  .mm-app--public .mm-add--label { width: auto; min-width: 70px; }
   .mm-app--public .mm-add .mm-icon { width: 20px; height: 20px; }
   .mm-app--public .mm-footer { font-size: 12px; gap: 8px; margin-top: 36px; }
   .mm-app--public .mm-page-heading { flex-wrap: wrap; gap: 18px; margin: 8px 0 25px; }

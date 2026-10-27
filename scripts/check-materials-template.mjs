@@ -49,4 +49,62 @@ try {
     }
     console.log(`Rendered ${variant.admin?'admin':'public'}/${variant.page}${variant.login?'/login':''}`);
   }
+  // Exercise selection, quantity limits and removal through the page's actual handlers.
+  const selected = { id:'fixture', name:'示例物资', unit:'个', location:'示例地点', images:[], quantity:3, category:'其他物资', model:'', consumable:false };
+  let interactionState;
+  const app = createSSRApp({ ...Component, setup(props, context) {
+    const state = Component.setup(props, context);
+    interactionState = state;
+    state.page.value = 'catalog'; state.loading.value = false; state.materials.value = [selected];
+    state.toggleCart(selected);
+    assert.equal(state.cart.value.length, 1);
+    state.changeCartQuantity(selected,1);
+    state.changeCartQuantity(selected,1);
+    state.changeCartQuantity(selected,1);
+    assert.equal(state.cart.value[0].quantity, 3, 'quantity cannot exceed available stock');
+    assert.equal(state.cartQuantity.value, 3);
+    state.changeCartQuantity(selected,-1);
+    state.changeCartQuantity(selected,-1);
+    state.changeCartQuantity(selected,-1);
+    assert.equal(state.cart.value.length, 0, 'decrement to zero removes the item');
+    state.addToCart(selected);
+    assert.equal(state.cart.value[0].quantity, 1, 'reselect starts at one');
+    state.addToCart(selected);
+    assert.equal(state.cart.value[0].quantity, 1, 'duplicate add does not silently increment');
+    state.cart.value[0].quantity = 2;
+    assert.equal(state.cartItem(selected.id).quantity, 2, 'quantity edited in the cart is shared with the card');
+    assert.equal(state.cartQuantity.value, 2);
+    return state;
+  }});
+  const selectedHtml = await renderToString(app);
+  assert.ok(selectedHtml.includes('减少示例物资借用数量') && selectedHtml.includes('增加示例物资借用数量'));
+  assert.ok(selectedHtml.includes('数量合计 2') && selectedHtml.includes('示例物资已选择数量'));
+  console.log('Selection, quantity limits, cart synchronization and selected state passed.');
+  const pointer = { button:0, isPrimary:true, pointerId:1 };
+  const click = { detail:1 };
+  const waitForHold = () => new Promise(resolve => setTimeout(resolve, 650));
+  interactionState.startQuantityHold(pointer, selected, 1);
+  await waitForHold();
+  interactionState.endQuantityHold(pointer);
+  interactionState.quantityClick(click, selected, 1);
+  assert.equal(interactionState.cartItem(selected.id).quantity, 3, 'hold fills to the current stock');
+  interactionState.startQuantityHold(pointer, selected, -1);
+  await waitForHold();
+  interactionState.endQuantityHold(pointer);
+  interactionState.quantityClick(click, selected, -1);
+  assert.equal(interactionState.cart.value.length, 0, 'hold minus removes the item');
+  interactionState.startQuantityHold(pointer, selected, 1);
+  await waitForHold();
+  interactionState.endQuantityHold(pointer);
+  interactionState.quantityClick(click, selected, 1);
+  assert.equal(interactionState.cartItem(selected.id).quantity, 3, 'hold on the initial add button selects all');
+  interactionState.removeCart(selected.id);
+  interactionState.startQuantityHold(pointer, selected, 1);
+  interactionState.endQuantityHold(pointer);
+  interactionState.quantityClick(click, selected, 1);
+  await waitForHold();
+  assert.equal(interactionState.cartItem(selected.id).quantity, 1, 'short click adds one and cancels the timer');
+  interactionState.quantityClick({detail:0}, selected, 1);
+  assert.equal(interactionState.cartItem(selected.id).quantity, 2, 'keyboard click increments one');
+  console.log('Long press, release suppression, cancellation and keyboard activation passed.');
 } finally { await server.close(); }
