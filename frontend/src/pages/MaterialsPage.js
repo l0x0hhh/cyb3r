@@ -48,7 +48,7 @@ export default {
     const returnLines = ref([]), returnNotes = ref('');
     const returnNeedsReview = computed(() => returnLines.value.some(line => Number(line.damaged)>0 || Number(line.lost)>0 || (Number(line.consumed)>0 && Number(line.consumed)*100 > line.borrowed*line.consumption_review_percent)));
     const categoryChoices = ['活动器材', '电子设备', '办公用品', '消耗品', '其他物资'];
-    let toastTimer, borrowRequest = null, returnRequest = null, entryRequest = null;
+    let toastTimer, holdTimer, activeHold = null, heldClick = null, borrowRequest = null, returnRequest = null, entryRequest = null;
     const uid = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     function notify(message, error = false) { clearTimeout(toastTimer); toast.value = { message, error }; toastTimer = setTimeout(() => { toast.value = null; }, 5500); }
     function headers() { const sessionId = adminRoute ? localStorage.getItem('sessionId') : ''; return sessionId ? { 'x-session-id': sessionId } : {}; }
@@ -83,6 +83,7 @@ export default {
             api('/entries')
           ]);
           materials.value = catalog.materials; demo.value = catalog.demo; loans.value = records; entries.value = entryRecords;
+          for (const item of cart.value) item.max = materials.value.find(m => m.id === item.materialId)?.quantity ?? 0;
         }
       } catch (error) { notify(error.message, true); } finally { loading.value = false; }
     }
@@ -92,7 +93,7 @@ export default {
     });
     watch(() => props.section, value => { if (adminRoute && value !== page.value) { page.value = value; query.value = ''; category.value = '全部'; type.value = 'all'; modal.value = null; load(); } });
     watch([page,category,type,onlyAvailable], () => { if(!adminRoute) { savePreference('materialPage',page.value); savePreference('materialCategory',category.value); savePreference('materialType',type.value); savePreference('materialOnlyAvailable',onlyAvailable.value); } });
-    onBeforeUnmount(() => { clearTimeout(toastTimer); for (const photo of photos.value) if (photo.preview.startsWith('blob:')) URL.revokeObjectURL(photo.preview); });
+    onBeforeUnmount(() => { clearTimeout(toastTimer); clearTimeout(holdTimer); for (const photo of photos.value) if (photo.preview.startsWith('blob:')) URL.revokeObjectURL(photo.preview); });
     const categories = computed(() => ['全部', ...new Set(materials.value.map(m => m.category))]);
     const filtered = computed(() => materials.value.filter(m => (category.value === '全部' || m.category === category.value) && (type.value === 'all' || m.consumable === (type.value === 'consumable')) && (!onlyAvailable.value || m.quantity > 0) && `${m.name} ${m.model} ${m.location}`.toLowerCase().includes(query.value.toLowerCase())));
     const stats = computed(() => ({ types: materials.value.length, available: materials.value.filter(m => m.status === 'active' && m.quantity > 0).length, consumable: materials.value.filter(m => m.consumable).length, active: loans.value.filter(l => l.remaining > 0).length, pending: reviews.value.filter(r => r.status === 'pending').length + entries.value.filter(e => e.status === 'pending').length }));
@@ -100,12 +101,59 @@ export default {
     const title = computed(() => ({ catalog:'物资大厅', mine:'我的借用', entry:adminRoute?'新增物资':'录入物资', inventory:'物资库存', loans:'借用记录', returns:'归还与核销', entries:'入库审核', ledger:'库存流水' }[page.value]));
     function switchPage(value) { if (adminRoute) { emit('navigate', value); return; } page.value = value; query.value = ''; category.value = '全部'; type.value = 'all'; if (value !== 'entry') entryResult.value = false; load(); }
     function addToCart(m) {
-      const existing = cart.value.find(item => item.materialId === m.id);
-      if (existing) { if (existing.quantity >= m.quantity) return notify('已达到当前可借数量', true); existing.quantity++; }
-      else cart.value.push({ materialId: m.id, name: m.name, unit: m.unit, location: m.location, image: m.images[0] || EMPTY_IMAGE, max: m.quantity, quantity: 1 });
+      if (isInCart(m.id)) return;
+      if (!m.quantity) return;
+      cart.value.push({ materialId: m.id, name: m.name, unit: m.unit, location: m.location, image: m.images[0] || EMPTY_IMAGE, max: m.quantity, quantity: 1 });
       borrowRequest = null; notify(`已加入借用清单：${m.name}`);
     }
+    function isInCart(id) { return cart.value.some(item => item.materialId === id); }
+    function cartItem(id) { return cart.value.find(item => item.materialId === id); }
+    const cartQuantity = computed(() => cart.value.reduce((total, item) => total + (Number.isSafeInteger(Number(item.quantity)) && Number(item.quantity) > 0 ? Number(item.quantity) : 0), 0));
     function removeCart(id) { cart.value = cart.value.filter(item => item.materialId !== id); borrowRequest = null; }
+    function changeCartQuantity(m, delta) {
+      const item = cartItem(m.id);
+      if (!item || ![1, -1].includes(delta)) return;
+      const quantity = Number(item.quantity);
+      const current = Number.isSafeInteger(quantity) && quantity > 0 ? quantity : 1;
+      if (delta < 0 && current === 1) { removeCart(m.id); notify(`已取消选择：${m.name}`); return; }
+      if (delta > 0 && current >= m.quantity) return;
+      item.quantity = current + delta;
+      item.max = m.quantity;
+      borrowRequest = null;
+    }
+    function startQuantityHold(event, m, delta) {
+      if (event.button !== 0 || event.isPrimary === false) return;
+      clearTimeout(holdTimer);
+      heldClick = null;
+      const hold = { pointerId:event.pointerId, materialId:m.id, delta };
+      activeHold = hold;
+      holdTimer = setTimeout(() => {
+        if (activeHold !== hold) return;
+        heldClick = { materialId:m.id, delta };
+        if (delta < 0) {
+          if (isInCart(m.id)) { removeCart(m.id); notify(`已取消选择：${m.name}`); }
+        } else if (Number.isSafeInteger(m.quantity) && m.quantity > 0) {
+          if (!isInCart(m.id)) addToCart(m);
+          const item = cartItem(m.id);
+          if (item) { item.quantity = m.quantity; item.max = m.quantity; borrowRequest = null; notify(`已选满：${m.name} ${m.quantity}${m.unit}`); }
+        }
+      }, 600);
+    }
+    function endQuantityHold(event) {
+      if (!activeHold || event.pointerId !== activeHold.pointerId) return;
+      clearTimeout(holdTimer);
+      activeHold = null;
+    }
+    function quantityClick(event, m, delta) {
+      if (event.detail !== 0 && heldClick?.materialId === m.id && heldClick.delta === delta) { heldClick = null; return; }
+      heldClick = null;
+      if (delta > 0 && !isInCart(m.id)) addToCart(m);
+      else changeCartQuantity(m, delta);
+    }
+    function toggleCart(m) {
+      if (isInCart(m.id)) { removeCart(m.id); notify(`已取消选择：${m.name}`); }
+      else addToCart(m);
+    }
     function openBorrow() {
       if (!cart.value.length) return;
       if (!borrowForm.dueDate) { const d = new Date(Date.now() + 7 * 86400000); borrowForm.dueDate = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
@@ -202,8 +250,8 @@ export default {
     const today = new Date().toLocaleDateString('zh-CN', { year:'numeric',month:'long',day:'numeric',weekday:'long' });
     function fallbackImage(event) { if (!event.target.src.endsWith('placeholder.svg')) event.target.src=EMPTY_IMAGE; }
     function closeModal() { if (!busy.value) modal.value = null; }
-    return { adminRoute,canInventory,canRecords,page,loading,busy,toast,demo,materials,loans,entries,reviews,ledger,admin,query,category,type,cart,modal,photos,uploadBusy,entryResult,onlyAvailable,action,importData,lookupForm,activeLookup,lookupCompleted,borrowForm,entry,returnLines,returnNotes,returnNeedsReview,categoryChoices,categories,filtered,stats,nav,title,today,
-      notify,load,switchPage,addToCart,removeCart,openBorrow,borrow,openReturn,submitReturn,confirmNormalReturn,resetLookup,lookupBorrowings,choosePhotos,retryPhoto,removePhoto,makeCover,submitEntry,openReview,review,openAdjust,adjust,openPolicy,savePolicy,toggleMaterial,exportInventory,importFile,confirmImport,showEntryRecords,matchingMaterials,formatDate,overdue,statusText,fallbackImage,closeModal };
+    return { adminRoute,canInventory,canRecords,page,loading,busy,toast,demo,materials,loans,entries,reviews,ledger,admin,query,category,type,cart,cartQuantity,modal,photos,uploadBusy,entryResult,onlyAvailable,action,importData,lookupForm,activeLookup,lookupCompleted,borrowForm,entry,returnLines,returnNotes,returnNeedsReview,categoryChoices,categories,filtered,stats,nav,title,today,
+      notify,load,switchPage,addToCart,isInCart,cartItem,changeCartQuantity,startQuantityHold,endQuantityHold,quantityClick,removeCart,toggleCart,openBorrow,borrow,openReturn,submitReturn,confirmNormalReturn,resetLookup,lookupBorrowings,choosePhotos,retryPhoto,removePhoto,makeCover,submitEntry,openReview,review,openAdjust,adjust,openPolicy,savePolicy,toggleMaterial,exportInventory,importFile,confirmImport,showEntryRecords,matchingMaterials,formatDate,overdue,statusText,fallbackImage,closeModal };
   },
   template: `
   <div class="mm-app" :class="{'mm-app--embedded':embedded,'mm-app--public':!embedded}">
@@ -227,7 +275,7 @@ export default {
           <div class="mm-section-heading"><div><span class="mm-kicker">EXPLORE THE COLLECTION</span><h2>找到你需要的物资<span class="mm-result-count">{{filtered.length}}</span></h2><p>加入借用清单，一次填写，轻松出发。</p></div><label class="mm-search"><MIcon name="search"/><input v-model="query" placeholder="搜索名称、规格或地点" aria-label="搜索物资"></label></div>
           <div class="mm-filters"><div class="mm-category"><button v-for="c in categories" :key="c" :class="{active:category===c}" :aria-pressed="category===c" @click="category=c">{{c}}</button></div><label class="mm-check"><input type="checkbox" v-model="onlyAvailable">只看可借</label></div>
           <div v-if="loading" class="mm-empty">正在读取库存…</div><div v-else-if="!filtered.length" class="mm-empty"><MIcon name="search"/><h3>暂无符合条件的物资</h3><p>试试其他关键词，或从“录入物资”提交新物资。</p></div>
-          <div v-else class="mm-grid"><article class="mm-material" v-for="m in filtered" :key="m.id"><button class="mm-material-picture" @click="modal={kind:'detail',item:m}" :aria-label="'查看'+m.name"><img :src="m.images[0]||'/assets/materials/placeholder.svg'" :alt="m.name" loading="lazy" @error="fallbackImage"><span class="mm-badge" :class="m.consumable?'mm-badge-sand':'mm-badge-white'">{{m.consumable?'消耗品':'可重复使用'}}</span><span v-if="!m.quantity" class="mm-unavailable">暂时借完</span></button><div class="mm-material-info"><div class="mm-material-title"><h3>{{m.name}}</h3><span>{{m.category}}</span></div><p class="mm-model">{{m.model||'标准规格'}}</p><p class="mm-location"><MIcon name="pin"/>{{m.location}}</p><div class="mm-material-bottom"><div><small>可借</small><strong>{{m.quantity}}</strong><span>{{m.unit}}</span><small v-if="m.outstanding" class="mm-outstanding">在借 {{m.outstanding}}{{m.unit}}</small></div><button class="mm-add" :disabled="!m.quantity" @click="addToCart(m)" :aria-label="'将'+m.name+'加入借用清单'"><MIcon name="add"/></button></div></div></article></div>
+          <div v-else class="mm-grid"><article class="mm-material" v-for="m in filtered" :key="m.id"><button class="mm-material-picture" @click="modal={kind:'detail',item:m}" :aria-label="'查看'+m.name"><img :src="m.images[0]||'/assets/materials/placeholder.svg'" :alt="m.name" loading="lazy" @error="fallbackImage"><span class="mm-badge" :class="m.consumable?'mm-badge-sand':'mm-badge-white'">{{m.consumable?'消耗品':'可重复使用'}}</span><span v-if="!m.quantity" class="mm-unavailable">暂时借完</span></button><div class="mm-material-info"><div class="mm-material-title"><h3>{{m.name}}</h3><span>{{m.category}}</span></div><p class="mm-model">{{m.model||'标准规格'}}</p><p class="mm-location"><MIcon name="pin"/>{{m.location}}</p><div class="mm-material-bottom"><div class="mm-stock"><small>可借</small><strong>{{m.quantity}}</strong><span>{{m.unit}}</span><small v-if="m.outstanding" class="mm-outstanding">在借 {{m.outstanding}}{{m.unit}}</small></div><button v-if="!isInCart(m.id)" type="button" class="mm-add mm-add--label" :disabled="!m.quantity" :aria-label="'将'+m.name+'加入借用清单，长按选满'" title="点击加入，长按选满" @pointerdown="startQuantityHold($event,m,1)" @pointerup="endQuantityHold($event)" @pointercancel="endQuantityHold($event)" @pointerleave="endQuantityHold($event)" @contextmenu.prevent @click="quantityClick($event,m,1)"><MIcon name="add"/><span>加入</span></button><div v-else class="mm-quantity" role="group" :aria-label="m.name+'借用数量'"><button type="button" :aria-label="Number(cartItem(m.id).quantity)<=1?'取消选择'+m.name:'减少'+m.name+'借用数量'" title="点击减少，长按取消选择" @pointerdown="startQuantityHold($event,m,-1)" @pointerup="endQuantityHold($event)" @pointercancel="endQuantityHold($event)" @pointerleave="endQuantityHold($event)" @contextmenu.prevent @click="quantityClick($event,m,-1)"><span aria-hidden="true">−</span></button><output :aria-label="m.name+'已选择数量'" aria-live="polite">{{cartItem(m.id).quantity}}</output><button type="button" :disabled="Number(cartItem(m.id).quantity)>=m.quantity" :aria-label="'增加'+m.name+'借用数量'" title="点击增加，长按选满" @pointerdown="startQuantityHold($event,m,1)" @pointerup="endQuantityHold($event)" @pointercancel="endQuantityHold($event)" @pointerleave="endQuantityHold($event)" @contextmenu.prevent @click="quantityClick($event,m,1)"><MIcon name="add"/></button><small class="mm-quantity-hint">长按＋选满 · 长按－取消</small></div></div></div></article></div>
         </template>
         <template v-else-if="page==='mine'">
           <div class="mm-page-heading"><div><span class="mm-kicker">MY BORROWINGS</span><h1>我的借用</h1><p>用借用时填写的姓名＋手机号查询，选择物资和数量提交归还。</p></div><button class="mm-button mm-secondary" @click="load" :disabled="loading||busy"><MIcon name="clock"/>刷新记录</button></div>
@@ -252,13 +300,13 @@ export default {
         <footer v-if="!embedded" class="mm-footer"><span>网络空间安全学院团委</span><span>按需借用 · 及时归还 · 共同维护</span></footer>
       </div>
     </main>
-    <div class="mm-cart-bar" v-if="!adminRoute && cart.length && page==='catalog'"><span class="mm-cart-icon"><MIcon name="bag"/><b>{{cart.length}}</b></span><div><strong>已选择 {{cart.length}} 种物资</strong><small>确认数量，填写信息即可借用</small></div><button class="mm-button mm-primary" @click="openBorrow">查看清单并借用<MIcon name="arrow"/></button></div>
+    <div class="mm-cart-bar" v-if="!adminRoute && cart.length && page==='catalog'"><span class="mm-cart-icon"><MIcon name="bag"/><b>{{cart.length}}</b></span><div><strong>已选 {{cart.length}} 种 · 数量合计 {{cartQuantity}}</strong><small>确认数量，填写信息即可借用</small></div><button class="mm-button mm-primary" @click="openBorrow">查看清单并借用<MIcon name="arrow"/></button></div>
     <Transition name="mm-toast"><div class="mm-toast-message" v-if="toast" :class="{error:toast.error}" role="status"><MIcon :name="toast.error?'clock':'check'"/>{{toast.message}}</div></Transition>
     <div v-if="modal" class="mm-overlay" @click.self="closeModal" @keydown.esc="closeModal"><section class="mm-modal" role="dialog" aria-modal="true" :aria-label="{borrow:'确认借用',return:'归还与消耗申报',detail:'物资详情',review:'确认处理',adjust:'盘点调整',success:'借用成功',entryRecords:'我的录入记录',import:'导入预览'}[modal.kind] || '消耗审核阈值'" :class="{'mm-modal-wide':['borrow','return','import','entryRecords'].includes(modal.kind)}"><button class="mm-modal-close" @click="closeModal" :disabled="busy" aria-label="关闭"><MIcon name="close"/></button>
       <template v-if="modal.kind==='borrow'"><span class="mm-kicker">BORROW MATERIALS</span><h2>确认借用</h2><p class="mm-modal-subtitle">无需审批，提交成功即记录借出。</p><form @submit.prevent="borrow"><div class="mm-cart-lines"><div class="mm-cart-line" v-for="item in cart" :key="item.materialId"><img :src="item.image" alt="" @error="fallbackImage"><div><strong>{{item.name}}</strong><small>{{item.location}}</small></div><input type="number" v-model.number="item.quantity" min="1" :max="item.max" step="1" required :aria-label="item.name+'借用数量'"><span>{{item.unit}}</span><button type="button" @click="removeCart(item.materialId)" aria-label="移除物资"><MIcon name="close"/></button></div></div><div class="mm-form-grid"><label>姓名 <em>*</em><input v-model="borrowForm.name" required maxlength="40" autocomplete="name" placeholder="借用人姓名"></label><label>手机号码 <em>*</em><input v-model="borrowForm.phone" required maxlength="30" autocomplete="tel" inputmode="tel" placeholder="用于联系及查询借用记录"></label><label>所属组织／专业 <em>*</em><input v-model="borrowForm.organization" required maxlength="80" placeholder="例如：团委组织部"></label><label>预计归还日期 <em>*</em><input v-model="borrowForm.dueDate" type="date" required></label><label class="mm-span2">活动／借用用途 <em>*</em><textarea v-model="borrowForm.purpose" required maxlength="300" rows="2" placeholder="例如：学院迎新活动"></textarea></label></div><div class="mm-modal-footer"><span><MIcon name="shield"/>无需注册或登录</span><button class="mm-button mm-primary" :disabled="busy||!cart.length">{{busy?'正在提交…':'确认借用'}}<MIcon name="arrow"/></button></div></form></template>
       <template v-else-if="modal.kind==='success'"><div class="mm-success-symbol"><MIcon name="check"/></div><h2>借用成功</h2><p class="mm-modal-subtitle">已登记借出，请按对应存放地点取用并按时归还。</p><div class="mm-receipt"><small>借用单号</small><strong>{{modal.id}}</strong></div><p class="mm-help">归还时进入“我的借用”，填写本次借用的姓名和手机号即可查询，无需保存或输入额外凭证。</p><button class="mm-button mm-primary mm-full" @click="modal=null;switchPage('mine')">查看我的借用<MIcon name="arrow"/></button></template>
       <template v-else-if="modal.kind==='return'"><span class="mm-kicker">RETURN & SETTLEMENT</span><h2>归还与消耗申报</h2><p class="mm-modal-subtitle">可以只归还一部分。消耗品全部用完，也可仅填写消耗量。</p><form @submit.prevent="submitReturn"><div class="mm-return-line" v-for="line in returnLines" :key="line.id"><div class="mm-return-line-title"><strong>{{line.name}}</strong><span>待处理 {{line.remaining}}{{line.unit}}</span></div><div class="mm-return-inputs"><label>完好归还<input type="number" v-model.number="line.good" min="0" :max="line.remaining" step="1" required></label><label>破损归还<input type="number" v-model.number="line.damaged" min="0" :max="line.remaining" step="1" required></label><label v-if="line.consumable">实际消耗<input type="number" v-model.number="line.consumed" min="0" :max="line.remaining" step="1" required></label><label>异常核销<input type="number" v-model.number="line.lost" min="0" :max="line.remaining" step="1" required></label></div><p class="mm-help">本次申报合计 {{Number(line.good)+Number(line.damaged)+Number(line.consumed)+Number(line.lost)}}{{line.unit}}，不能超过待处理量。</p><p v-if="line.consumable" class="mm-help">本次消耗 {{Number(line.consumed)}} / 原借出 {{line.borrowed}}{{line.unit}}；自动核销上限 {{line.consumption_review_percent}}%，超过后需确认。</p></div><label>情况说明<textarea v-model="returnNotes" maxlength="1000" rows="3" placeholder="有消耗、破损或遗失时，请说明活动使用情况或原因"></textarea></label><div class="mm-info-note"><MIcon name="clock"/>{{returnNeedsReview?'本次消耗超出阈值或含破损、遗失，将交管理员确认；你也可以先单独提交正常归还。':'正常归还与阈值内消耗，提交后即时结算，无需管理员确认。'}}</div><button class="mm-button mm-primary mm-full" :disabled="busy">{{busy?'正在提交…':(returnNeedsReview?'提交管理员确认':'确认归还并结算')}}</button></form></template>
-      <template v-else-if="modal.kind==='detail'"><img class="mm-detail-image" :src="modal.item.images[0]||'/assets/materials/placeholder.svg'" :alt="modal.item.name" @error="fallbackImage"><span class="mm-kicker">{{modal.item.category}}</span><h2>{{modal.item.name}}</h2><p>{{modal.item.model}}</p><div class="mm-detail-meta"><span><MIcon name="pin"/>{{modal.item.location}}</span><span>可借 <b>{{modal.item.quantity}}</b>{{modal.item.unit}}</span><span>{{modal.item.consumable?'消耗品，可归还剩余并申报消耗':'可重复使用，请保持完好归还'}}</span></div><p class="mm-note">{{modal.item.notes||'暂无补充说明'}}</p><div class="mm-review-photos" v-if="modal.item.images.length>1"><a v-for="image in modal.item.images" :key="image" :href="image" target="_blank" rel="noopener"><img :src="image" alt="物资照片" @error="fallbackImage"></a></div><button v-if="!adminRoute" class="mm-button mm-primary mm-full" :disabled="!modal.item.quantity" @click="addToCart(modal.item);modal=null"><MIcon name="add"/>加入借用清单</button></template>
+      <template v-else-if="modal.kind==='detail'"><img class="mm-detail-image" :src="modal.item.images[0]||'/assets/materials/placeholder.svg'" :alt="modal.item.name" @error="fallbackImage"><span class="mm-kicker">{{modal.item.category}}</span><h2>{{modal.item.name}}</h2><p>{{modal.item.model}}</p><div class="mm-detail-meta"><span><MIcon name="pin"/>{{modal.item.location}}</span><span>可借 <b>{{modal.item.quantity}}</b>{{modal.item.unit}}</span><span>{{modal.item.consumable?'消耗品，可归还剩余并申报消耗':'可重复使用，请保持完好归还'}}</span></div><p class="mm-note">{{modal.item.notes||'暂无补充说明'}}</p><div class="mm-review-photos" v-if="modal.item.images.length>1"><a v-for="image in modal.item.images" :key="image" :href="image" target="_blank" rel="noopener"><img :src="image" alt="物资照片" @error="fallbackImage"></a></div><button v-if="!adminRoute" type="button" class="mm-button mm-primary mm-full" :disabled="!modal.item.quantity && !isInCart(modal.item.id)" :aria-pressed="isInCart(modal.item.id)" @click="toggleCart(modal.item);modal=null"><MIcon :name="isInCart(modal.item.id)?'check':'add'"/>{{isInCart(modal.item.id)?'取消选择':'加入借用清单'}}</button></template>
       <template v-else-if="modal.kind==='review'"><span class="mm-kicker">REVIEW</span><h2>{{action.decision==='approved'?(modal.reviewKind==='entries'?'确认物资入库':'确认归还与核销'):'驳回申请'}}</h2><p class="mm-modal-subtitle">{{action.decision==='approved'?'请核实实收数量及申报情况，确认后会更新库存和流水。':'填写具体原因，方便提交者核对后重新提交。'}}</p><form @submit.prevent="review"><label v-if="modal.reviewKind==='entries' && action.decision==='approved'">入库方式<select v-model="action.targetId"><option value="">新建物资档案</option><option v-for="m in matchingMaterials(modal.item.data)" :key="m.id" :value="m.id">补充到已有档案：{{m.name}}（当前{{m.quantity}}{{m.unit}}）</option></select></label><label>审核意见{{action.decision==='rejected'?' *':''}}<textarea v-model="action.note" :required="action.decision==='rejected'" maxlength="1000" rows="3" placeholder="填写核对说明"></textarea></label><button class="mm-button mm-primary mm-full" :disabled="busy">{{busy?'正在处理…':'确认处理'}}</button></form></template>
       <template v-else-if="modal.kind==='adjust'"><span class="mm-kicker">STOCKTAKING</span><h2>盘点调整</h2><p class="mm-modal-subtitle">{{modal.item.name}} · 当前可借 {{modal.item.quantity}}{{modal.item.unit}}</p><form @submit.prevent="adjust"><label>调整增减数量<input type="number" v-model.number="action.delta" min="-1000000" max="1000000" step="1" required placeholder="正数增加，负数减少"></label><label>调整原因 *<textarea v-model="action.note" required maxlength="300" rows="3" placeholder="说明盘点差异或补录原因"></textarea></label><p class="mm-help">本次调整仅改变在库完好数量，不会抹除在借数量。</p><button class="mm-button mm-primary mm-full" :disabled="busy">确认调整并记录流水</button></form></template>
       <template v-else-if="modal.kind==='entryRecords'"><span class="mm-kicker">MY REGISTRATIONS</span><h2>我的录入记录</h2><p class="mm-modal-subtitle">显示当前浏览器提交的物资。</p><div v-if="!entries.length" class="mm-empty">还没有录入记录</div><article v-for="e in entries" :key="e.id" class="mm-entry-record"><div><strong>{{e.data.name}} × {{e.data.quantity}}{{e.data.unit}}</strong><small>{{e.data.location}} · {{formatDate(e.created_at)}}</small><p v-if="e.review_note">{{e.review_note}}</p></div><span class="mm-badge" :class="e.status==='pending'?'mm-badge-sand':(e.status==='approved'?'mm-badge-green':'mm-badge-red')">{{statusText(e.status)}}</span></article></template>

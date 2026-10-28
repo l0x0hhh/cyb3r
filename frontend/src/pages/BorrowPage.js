@@ -32,12 +32,12 @@ const BorrowPage = {
               <p class="portal-affiliation">暨南大学网络空间安全学院</p>
             </div>
           </div>
-          <a class="system-portal-link" href="/materials"><span>物资借用</span><span aria-hidden="true">↗</span></a>
         </div>
       </header>
       <nav class="portal-tabs" aria-label="借还导航">
         <button class="portal-tab" :class="{ 'portal-tab--active': activeMode === 'borrow' }" @click="switchMode('borrow')">借设备</button>
         <button class="portal-tab" :class="{ 'portal-tab--active': activeMode === 'return' }" @click="switchMode('return')">还设备</button>
+        <a class="portal-tab portal-tab--materials" href="/materials">物资借用 <span aria-hidden="true">↗</span></a>
       </nav>
 
       <main class="portal-main">
