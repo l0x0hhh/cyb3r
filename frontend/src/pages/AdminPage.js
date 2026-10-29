@@ -6,6 +6,7 @@ import { useSiteFooter } from '../composables/use-site-footer.js';
 import { formatDate } from '../utils/date.js';
 import MaterialsPage from './MaterialsPage.js';
 import '../styles/admin-areas.css';
+import '../styles/operations-panel.css';
 import { preference, savePreference } from '../services/preferences.js';
 
 // 批量工作簿共用同一组中文列定义，避免模板、预览和导出字段漂移。
@@ -141,23 +142,37 @@ const AdminPage = {
         <!-- 超级管理员专属账号管理面板：普通管理员不会看到该入口。 -->
         <transition name="admin-tab" :css="!prefersReducedMotion">
         <div v-if="activeTab === 'admin-management' && isSuperAdmin" class="tab-content">
-          <section class="email-settings-section" aria-label="系统运行维护配置">
-            <h2>系统运行维护</h2><p>磁盘每分钟检查；邮件使用已有SMTP发件配置。仅超级管理员可配置。</p>
-            <p v-if="operationsStatus">磁盘已用 {{operationsStatus.usedPercent}}%，可用 {{(operationsStatus.free/1024**3).toFixed(2)}} GiB · {{operationsStatus.level}}</p>
-            <p v-if="operationsStatus?.lastCheck?.error" role="alert">{{operationsStatus.lastCheck.error}}</p>
-            <form @submit.prevent="saveOperations">
-              <label class="email-settings-check"><input type="checkbox" v-model="operationsConfig.enabled">启用磁盘邮件告警</label>
-              <div class="email-settings-row">
-                <label>预警阈值（%）<input class="input" type="number" min="50" max="98" v-model.number="operationsConfig.warningPercent" required></label>
-                <label>严重阈值（%）<input class="input" type="number" min="51" max="99" v-model.number="operationsConfig.criticalPercent" required></label>
-                <label>重复提醒间隔（小时）<input class="input" type="number" min="1" max="168" v-model.number="operationsConfig.cooldownHours" required></label>
-              </div>
-              <label>告警接收邮箱（每行一个，最多10个）<textarea class="input textarea" v-model="operationsRecipients" rows="3"></textarea></label>
-              <p>应用停止时无法自行发信；独立服务状态检查工具可用于外部监控。异地存储暂未启用。</p>
-              <p role="status">{{operationsMessage}}</p>
-              <button class="btn btn--primary" :disabled="operationsBusy">保存运行配置</button>
-              <button class="btn btn--ghost" type="button" :disabled="operationsBusy" @click="checkOperations">按已保存配置立即检查</button>
-            </form>
+          <section class="ops-panel" aria-labelledby="ops-title" :aria-busy="operationsLoading || operationsBusy">
+            <header class="ops-header"><div><span class="ops-eyebrow">系统设置</span><h2 id="ops-title">运行维护</h2><p>监测磁盘空间，及时接收容量提醒。</p></div><span class="ops-access">仅超级管理员</span></header>
+            <div class="ops-layout">
+              <aside class="ops-summary">
+                <span class="ops-caption">数据磁盘使用情况</span>
+                <template v-if="operationsStatus"><div class="ops-disk-value">{{operationsStatus.usedPercent}}<small>%</small></div>
+                  <div class="ops-meter" role="progressbar" aria-label="磁盘使用率" :aria-valuenow="operationsStatus.usedPercent" aria-valuemin="0" aria-valuemax="100"><span :style="{width:Math.min(100,Math.max(0,operationsStatus.usedPercent))+'%'}" :class="'ops-level--'+operationsStatus.level"></span></div>
+                  <div class="ops-disk-meta"><span>可用 {{(operationsStatus.free/1024**3).toFixed(2)}} GiB</span><strong :class="'ops-text--'+operationsStatus.level">{{({ok:'空间充足',warning:'空间预警',critical:'空间严重不足'})[operationsStatus.level]||'状态未知'}}</strong></div>
+                  <p v-if="operationsStatus.lastCheck?.at">最近检查：{{new Date(operationsStatus.lastCheck.at).toLocaleString('zh-CN')}}</p>
+                </template><p v-else>{{operationsLoading?'正在读取磁盘状态…':'磁盘状态暂不可用'}}</p>
+                <div class="ops-summary-note"><strong>每分钟自动检查</strong><p>启用后使用已配置的 SMTP 发件账号。达到阈值时发送邮件，重复提醒按设定间隔发送。</p></div>
+              </aside>
+              <form class="ops-form" @submit.prevent="saveOperations">
+                <fieldset :disabled="operationsBusy || operationsLoading || !operationsReady">
+                  <label class="ops-toggle"><span><strong>磁盘邮件告警</strong><small>{{operationsConfig.enabled?'已开启，按保存后的规则提醒':'暂未开启，可先保存阈值和接收邮箱'}}</small></span><input type="checkbox" v-model="operationsConfig.enabled" role="switch" aria-label="启用磁盘邮件告警"><span class="ops-switch" aria-hidden="true"></span></label>
+                  <div class="ops-fields">
+                    <label>预警阈值<span class="ops-input-unit"><input type="number" min="50" max="98" v-model.number="operationsConfig.warningPercent" required><span>%</span></span><small>达到此比例发送预警</small></label>
+                    <label>严重阈值<span class="ops-input-unit"><input type="number" :min="Number(operationsConfig.warningPercent)+1" max="99" v-model.number="operationsConfig.criticalPercent" required><span>%</span></span><small>须高于预警阈值</small></label>
+                    <label>重复提醒间隔<span class="ops-input-unit"><input type="number" min="1" max="168" v-model.number="operationsConfig.cooldownHours" required><span>小时</span></span><small>同级告警避免频繁打扰</small></label>
+                  </div>
+                  <label class="ops-recipients">接收邮箱<textarea v-model="operationsRecipients" rows="3" placeholder="每行一个邮箱，例如 admin@example.com" :required="operationsConfig.enabled" spellcheck="false"></textarea><small>最多 10 个邮箱，启用前请先完成邮件通知中的 SMTP 配置。</small></label>
+                </fieldset>
+                <p v-if="operationsStatus?.lastCheck?.error" class="ops-feedback ops-feedback--error" role="alert">{{operationsStatus.lastCheck.error}}</p>
+                <p v-if="operationsMessage" class="ops-feedback" :class="{'ops-feedback--error':operationsError}" :role="operationsError?'alert':'status'">{{operationsMessage}}</p>
+                <footer class="ops-actions"><span>{{operationsDirty?'有未保存的修改，请先保存':'立即检查使用已保存的配置'}}</span><div>
+                  <button class="ops-button ops-button--secondary" type="button" :disabled="operationsBusy || operationsLoading" @click="operationsReady?checkOperations():loadOperations()">{{operationsLoading?'正在加载…':!operationsReady?'重新加载':operationsAction==='check'?'正在检查…':'立即检查'}}</button>
+                  <button class="ops-button ops-button--primary" type="submit" :disabled="operationsBusy || operationsLoading || !operationsReady">{{operationsAction==='save'?'正在保存…':'保存配置'}}</button>
+                </div></footer>
+              </form>
+            </div>
+            <div class="ops-footnote">当前仅监测本机磁盘。应用停止时无法自行发信；异地存储暂未启用。</div>
           </section>
 
           <div class="section-header">
@@ -1392,17 +1407,37 @@ const AdminPage = {
 
     const operationsConfig=Vue.reactive({enabled:false,warningPercent:80,criticalPercent:90,cooldownHours:6});
     const operationsRecipients=Vue.ref(''),operationsMessage=Vue.ref(''),operationsStatus=Vue.ref(null),operationsBusy=Vue.ref(false);
+    const operationsLoading=Vue.ref(false),operationsReady=Vue.ref(false),operationsError=Vue.ref(false),operationsAction=Vue.ref(''),operationsSaved=Vue.ref('');
+    const operationsPayload=()=>({...operationsConfig,recipients:operationsRecipients.value.split(/[\n,;]+/).map(v=>v.trim()).filter(Boolean)});
+    const operationsDirty=Vue.computed(()=>operationsReady.value && JSON.stringify(operationsPayload())!==operationsSaved.value);
     async function loadOperations(){
-      try{const res=await apiCall('GET','/api/admin/operations');if(!res.success)throw new Error(res.message);Object.assign(operationsConfig,res.data.settings);operationsRecipients.value=res.data.settings.recipients.join('\n');operationsStatus.value=res.data.status;}
-      catch(e){operationsMessage.value=e.message||'运行配置加载失败';}
+      if(operationsLoading.value)return;operationsLoading.value=true;
+      try{const res=await apiCall('GET','/api/admin/operations');if(!res.success)throw new Error(res.message);
+        Object.assign(operationsConfig,res.data.settings);operationsRecipients.value=res.data.settings.recipients.join('\n');operationsStatus.value=res.data.status;
+        operationsSaved.value=JSON.stringify(operationsPayload());operationsReady.value=true;operationsError.value=false;operationsMessage.value='';
+      }catch(e){operationsError.value=true;operationsMessage.value=e.message||'运行配置加载失败，请重新加载';}
+      finally{operationsLoading.value=false;}
     }
-    async function saveOperations(){if(operationsBusy.value)return;operationsBusy.value=true;try{
-      const res=await apiCall('PUT','/api/admin/operations',{...operationsConfig,recipients:operationsRecipients.value.split(/[\n,;]+/).map(v=>v.trim()).filter(Boolean)});
-      if(!res.success)throw new Error(res.message);operationsMessage.value='运行配置已保存';await loadOperations();
-    }catch(e){operationsMessage.value=e.message;}finally{operationsBusy.value=false;}}
-    async function checkOperations(){if(operationsBusy.value)return;operationsBusy.value=true;try{
-      const res=await apiCall('POST','/api/admin/operations/check',{});if(!res.success)throw new Error(res.message);operationsStatus.value=res.data;operationsMessage.value='检查完成；未达阈值或处于提醒间隔内不会发信';
-    }catch(e){operationsMessage.value=e.message;}finally{operationsBusy.value=false;}}
+    async function saveOperations(){
+      if(operationsBusy.value||operationsLoading.value||!operationsReady.value)return;
+      const payload=operationsPayload();
+      if(payload.warningPercent>=payload.criticalPercent){operationsError.value=true;operationsMessage.value='严重阈值必须高于预警阈值';return;}
+      operationsBusy.value=true;operationsAction.value='save';operationsError.value=false;operationsMessage.value='';
+      try{const res=await apiCall('PUT','/api/admin/operations',payload);if(!res.success)throw new Error(res.message);
+        Object.assign(operationsConfig,res.data);operationsRecipients.value=res.data.recipients.join('\n');operationsSaved.value=JSON.stringify(operationsPayload());operationsMessage.value='配置已保存'+(operationsConfig.enabled?'，磁盘告警已启用':'，邮件告警保持关闭');
+      }catch(e){operationsError.value=true;operationsMessage.value=e.message||'保存失败，填写内容已保留';}
+      finally{operationsBusy.value=false;operationsAction.value='';}
+    }
+    async function checkOperations(){
+      if(operationsBusy.value||operationsLoading.value||!operationsReady.value)return;
+      if(operationsDirty.value){operationsError.value=true;operationsMessage.value='配置尚未保存，请先保存后再检查';return;}
+      operationsBusy.value=true;operationsAction.value='check';operationsError.value=false;operationsMessage.value='';
+      try{const res=await apiCall('POST','/api/admin/operations/check',{});if(!res.success)throw new Error(res.message);operationsStatus.value=res.data;
+        const check=res.data.lastCheck;operationsError.value=Boolean(check?.error);
+        operationsMessage.value=check?.error || (check?.sent?'检查完成，告警邮件已发送':!operationsConfig.enabled?'检查完成，邮件告警未启用':'检查完成；未达阈值或处于提醒间隔内，无需重复发信');
+      }catch(e){operationsError.value=true;operationsMessage.value=e.message||'检查失败，请稍后重试';}
+      finally{operationsBusy.value=false;operationsAction.value='';}
+    }
     async function loadData() {
       // 每个管理区仅加载自己的业务数据；物资由MaterialsPage负责。
       if (activeArea.value === 'materials') return;
@@ -2497,7 +2532,7 @@ const AdminPage = {
     });
 
     return {
-      operationsConfig,operationsRecipients,operationsMessage,operationsStatus,operationsBusy,saveOperations,checkOperations,
+      operationsConfig,operationsRecipients,operationsMessage,operationsStatus,operationsBusy,operationsLoading,operationsReady,operationsError,operationsAction,operationsDirty,loadOperations,saveOperations,checkOperations,
       isLoggedIn, username, password, adminUser, isSuperAdmin, loginError, submitting, prefersReducedMotion, devices, records, activeRecords, archivedRecords, statistics,
           statisticsDisplay, statisticsReady, statisticsTrendAnimationKey,
       operationLogs, operationLogFilter, filteredOperationLogs,
