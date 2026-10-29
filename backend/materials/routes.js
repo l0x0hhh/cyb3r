@@ -45,9 +45,10 @@ function createMaterialsRouter({ store, requireAdminPermission, upload, validate
     materials: store.listMaterials(true), entries: store.entries(null, true), ledger: store.ledger(), demo: Boolean(demo)
   })));
   router.get('/admin/records', records, handle(() => ({
-    loans: store.loanRecords(null, true), returns: store.adminReturns(), demo: Boolean(demo)
+    loans: store.loanRecords(null, true), returns: store.adminReturns(), alerts: store.consumptionAlerts(), demo: Boolean(demo)
   })));
   router.post('/admin/materials', devices, handle(req => store.addMaterial(req.materialOwner, req.body, actor(req))));
+  router.post('/admin/materials/:id/stocktake', devices, handle(req => store.stocktake(req.params.id, req.body, actor(req))));
   router.post('/admin/materials/:id/adjust', devices, handle(req => store.adjust(req.params.id, req.body.delta, req.body.reason, actor(req))));
   router.post('/admin/materials/:id/consumption-policy', devices, handle(req => store.setConsumptionPolicy(req.params.id, req.body.percent, actor(req))));
   router.post('/admin/materials/:id/status', devices, handle(req => store.setStatus(req.params.id, req.body.status, actor(req))));

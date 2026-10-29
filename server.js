@@ -1663,6 +1663,26 @@ app.get('/api/statistics/borrowing', requireAdminPermission('statistics'), (req,
 });
 
 // 管理员邮件通知设置：SMTP 密码只在服务端加密保存，不回传到浏览器。
+const { createOperations } = require('./backend/operations');
+const operations = createOperations({ directory:DATA_DIR, send:async (recipients,subject,text) => {
+  const settings=readEmailSettings(),secret=decryptEmailSecret(settings.smtp.secretEncrypted);
+  if(!settings.smtp.host || !settings.smtp.username || !secret) throw new Error('请先保存SMTP发件配置');
+  await sendSmtpMail({smtp:settings.smtp,secret,recipients,subject,text});
+}});
+const operationsTimer=setInterval(()=>void operations.check(),60000);
+operationsTimer.unref();
+app.get('/api/admin/operations',requireSuperAdmin,(req,res)=>{
+  try {res.json({success:true,data:{settings:operations.settings(),status:operations.status()}});}
+  catch {res.status(500).json({success:false,message:'无法读取运行配置'});}
+});
+app.put('/api/admin/operations',requireSuperAdmin,(req,res)=>{
+  try { if(req.body.enabled) { const mail=readEmailSettings(); if(!mail.smtp.host || !mail.smtp.username || !decryptEmailSecret(mail.smtp.secretEncrypted)) return res.status(400).json({success:false,message:'请先在邮件通知页面保存SMTP发件配置'}); } const data=operations.save(req.body);res.json({success:true,data}); }
+  catch(e){res.status(400).json({success:false,message:e.message});}
+});
+app.post('/api/admin/operations/check',requireSuperAdmin,async(req,res)=>{
+  await operations.check();res.json({success:true,data:operations.status()});
+});
+
 app.get('/api/admin/email-settings', requireAdminPermission('email-settings'), (req, res) => {
   res.json({ success: true, data: toPublicEmailSettings(readEmailSettings()) });
 });

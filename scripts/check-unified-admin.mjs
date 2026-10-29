@@ -102,5 +102,29 @@ try {
     state.expireAdminSession();assert.equal(state.isLoggedIn.value,false);
     assert.equal(localStorage.getItem('sessionId'),null);assert.equal(sessionStorage.getItem('materials_admin_session'),null);
   }
+  const ops = await renderAdmin(superUser,'admin-management');
+  assert.ok(ops.html.includes('ops-panel') && ops.html.includes('ops-button--primary'));
+  assert.ok(!loggedOut.html.includes('id="ops-title"'));
+  const config={enabled:false,warningPercent:80,criticalPercent:90,cooldownHours:6,recipients:[]};
+  const status={usedPercent:49,free:20*1024**3,level:'ok',lastCheck:null};
+  const calls=[];
+  globalThis.fetch=async(url,options)=>{calls.push({url,method:options.method});return {json:async()=>({success:true,data:options.method==='GET'?{settings:config,status}:options.method==='PUT'?JSON.parse(options.body):{...status,lastCheck:{error:'邮件发送失败'}}})};};
+  await ops.state.loadOperations();assert.equal(ops.state.operationsReady.value,true);
+  assert.equal(ops.state.operationsDirty.value,false);
+  ops.state.operationsConfig.warningPercent=81;
+  await ops.state.checkOperations();assert.equal(calls.length,1,'unsaved config cannot trigger checks');
+  assert.equal(ops.state.operationsError.value,true);
+  await ops.state.saveOperations();assert.equal(ops.state.operationsDirty.value,false);
+  assert.equal(ops.state.operationsError.value,false);
+  await ops.state.checkOperations();assert.equal(ops.state.operationsMessage.value,'邮件发送失败');
+  assert.equal(ops.state.operationsError.value,true,'server failures cannot appear as successful checks');
+  globalThis.fetch=async()=>{throw new Error('连接失败');};
+  ops.state.operationsConfig.cooldownHours=8;
+  await ops.state.saveOperations();assert.equal(ops.state.operationsConfig.cooldownHours,8,'failure retains edits');
+  assert.equal(ops.state.operationsBusy.value,false);
+  const unloaded=await renderAdmin(superUser,'admin-management');
+  await unloaded.state.loadOperations();assert.equal(unloaded.state.operationsReady.value,false);
+  await unloaded.state.saveOperations();assert.equal(unloaded.state.operationsReady.value,false);
+  console.log('Operations panel: loading safety, dirty config, save, failed check and edit preservation passed.');
   console.log('Separate admin areas: single login, 9 panels, isolated navigation and data loads, independent permissions, old alias and session expiry passed.');
 } finally { await server.close(); }
