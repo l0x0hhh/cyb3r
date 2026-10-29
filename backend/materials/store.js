@@ -77,6 +77,8 @@ function createMaterialsStore({ databasePath, demo = false }) {
       actor TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS mat_loans_owner ON mat_loans(owner_hash);
     CREATE INDEX IF NOT EXISTS mat_lines_loan ON mat_lines(loan_id);
+    CREATE INDEX IF NOT EXISTS mat_lines_material ON mat_lines(material_id);
+    CREATE INDEX IF NOT EXISTS mat_ledger_material_id ON mat_ledger(material_id,id);
     CREATE INDEX IF NOT EXISTS mat_return_status ON mat_returns(status);`);
   const get = (sql, ...args) => db.prepare(sql).get(...args);
   const all = (sql, ...args) => db.prepare(sql).all(...args);
@@ -122,7 +124,7 @@ function createMaterialsStore({ databasePath, demo = false }) {
     return id;
   }
   function listMaterials(admin = false) {
-    return all(`SELECT m.*, COALESCE((SELECT SUM(borrowed-returned-damaged-consumed-lost) FROM mat_lines WHERE material_id=m.id),0) outstanding FROM mat_materials m ${admin ? '' : "WHERE status='active'"} ORDER BY created_at,id`)
+    return all(`SELECT m.*, COALESCE(t.outstanding,0) outstanding FROM mat_materials m LEFT JOIN (SELECT material_id,SUM(borrowed-returned-damaged-consumed-lost) outstanding FROM mat_lines GROUP BY material_id) t ON t.material_id=m.id ${admin ? '' : "WHERE status='active'"} ORDER BY m.created_at,m.id`)
       .map(row => ({ ...row, consumable: Boolean(row.consumable), images: JSON.parse(row.images) }));
   }
   function remaining(line) { return line.borrowed - line.returned - line.damaged - line.consumed - line.lost; }
@@ -321,6 +323,31 @@ function createMaterialsStore({ databasePath, demo = false }) {
       ledger(id, '盘点调整', delta, 0, 0, randomUUID(), actor, note); return { id };
     });
   }
+  function stocktake(id, input, actor) {
+    const counted = quantity(input.counted, '实盘完好在库数量', true);
+    const expected = quantity(input.expected, '账面数量', true);
+    const note = text(input.reason, '盘点原因', 300);
+    const requestId = text(input.requestId, '盘点请求标识', 100);
+    const key = `stocktake:${requestId}`, fingerprint = hash(json({ id, counted, expected, note, actor }));
+    return transaction(() => {
+      const previous = get('SELECT value FROM mat_meta WHERE key=?', key);
+      if (previous) { if (previous.value !== fingerprint) fail('盘点请求内容已变化', 409); return { repeated:true }; }
+      const material = get('SELECT quantity FROM mat_materials WHERE id=?', id);
+      if (!material) fail('物资不存在', 404);
+      if (material.quantity !== expected) fail('盘点期间库存已变化，请刷新后重新核对', 409);
+      run('UPDATE mat_materials SET quantity=? WHERE id=?', counted, id);
+      ledger(id, '实物盘点', counted-expected, 0, 0, requestId, actor, `账面${expected}，实盘${counted}；${note}`);
+      run('INSERT INTO mat_meta(key,value) VALUES(?,?)', key, fingerprint);
+      return { before:expected, after:counted, difference:counted-expected };
+    });
+  }
+  function consumptionAlerts() {
+    return all(`SELECT l.id loan_id, x.id line_id, x.name, x.unit, x.borrowed, x.consumed,
+      m.consumption_review_percent threshold FROM mat_lines x
+      JOIN mat_loans l ON l.id=x.loan_id JOIN mat_materials m ON m.id=x.material_id
+      WHERE x.consumable=1 AND x.consumed>0 AND x.consumed*100>x.borrowed*m.consumption_review_percent
+      ORDER BY l.created_at DESC LIMIT 100`);
+  }
   function setConsumptionPolicy(id, percent, actor) {
     consumptionPercent(percent);
     return transaction(() => {
@@ -369,7 +396,7 @@ function createMaterialsStore({ databasePath, demo = false }) {
     run("INSERT INTO mat_meta(key,value) VALUES('demo_seeded','1')");
   });
   return { databasePath, listMaterials, borrow, loanRecords, lookupRecords, restore, submitReturn, confirmNormalReturn, reviewReturn, submitEntry, reviewEntry,
-    entries, adminReturns, addMaterial, adjust, setConsumptionPolicy, setStatus, importMaterials,
+    entries, adminReturns, addMaterial, adjust, stocktake, consumptionAlerts, setConsumptionPolicy, setStatus, importMaterials,
     registerImage: (owner, image) => run('INSERT INTO mat_uploads(image,owner_hash,created_at) VALUES(?,?,?)', image, owner, now()),
     ledger: () => all('SELECT l.*,m.name,m.unit FROM mat_ledger l JOIN mat_materials m ON m.id=l.material_id ORDER BY l.id DESC LIMIT 1000'),
     close: () => db.close() };

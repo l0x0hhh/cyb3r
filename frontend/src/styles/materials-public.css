@@ -398,3 +398,5 @@
   .mm-app--public *, .mm-app--public *::before, .mm-app--public *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   .mm-app--public .mm-material:hover, .mm-app--public .mm-add:hover, .mm-app--public .mm-sidebar nav button:hover { transform: none; }
 }
+
+.mm-app--public .mm-card-quantity-input { width: 56px; min-width: 0; min-height: 44px; font-size: 16px; text-align: center; border: 1px solid #c6d4c7; border-radius: 8px; background: #fff; color: #204b3d; }

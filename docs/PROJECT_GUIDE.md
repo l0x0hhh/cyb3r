@@ -13,3 +13,5 @@
 物资用户端视觉层为 frontend/src/styles/materials-public.css，全部规则限定于 .mm-app--public，只有非嵌入的 MaterialsPage 使用此根类。请勿将该视觉层改为 body、全局 button 等选择器，避免改变设备系统或统一管理后台。原 materials.css 继续提供物资页面基础布局与后台嵌入样式。物资公共页的动效遵守 prefers-reduced-motion，毛玻璃提供实色回退；表单维持 16px 文字，避免手机端输入时缩放。
 
 设备与物资公共页的双向入口由 portal-links.css 提供：设备页的“物资借用”位于借还导航中，物资页的“设备借还”位于页头。物资后台视觉层为 materials-admin.css，限定 .mm-app--embedded 与 .admin-page--materials；后者仅在登录后选中物资区域时生效。后台输入框和正文至少 16px，辅助信息保持 14px；表格在窄屏横向滚动，交互目标至少 44px，动画遵守减少动态效果偏好。
+
+实盘盘点使用 POST /api/v2/admin/materials/:id/stocktake，填写 counted、expected、reason、requestId；只改变完好在库量，重复请求不重复调整，库存变化返回409。累计消耗提醒仅对借用记录管理员显示。运维只读报告与恢复演练流程见 OPERATIONS.md。

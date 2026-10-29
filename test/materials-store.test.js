@@ -220,3 +220,26 @@ test('an older pending normal return can be self-confirmed without migrating his
   assert.equal(store.loanRecords('owner')[0].remaining,1);
   assert.equal(store.listMaterials().find(m=>m.id===material.id).quantity,before-1);
 });
+
+
+test('stocktake preserves loan responsibility, rejects stale counts and deduplicates retries', t => {
+  const store=fixture(t), material=store.listMaterials().find(m=>m.quantity>10);
+  const input={counted:material.quantity-2,expected:material.quantity,reason:'实盘差异',requestId:randomUUID()};
+  const result=store.stocktake(material.id,input,'admin');
+  assert.equal(result.difference,-2);
+  assert.equal(store.stocktake(material.id,input,'admin').repeated,true);
+  assert.throws(()=>store.stocktake(material.id,{...input,requestId:randomUUID()},'admin'),/库存已变化/);
+  assert.throws(()=>store.stocktake(material.id,{...input,counted:-1},'admin'),/非负/);
+  assert.equal(store.ledger().filter(l=>l.type==='实物盘点').length,1);
+  assert.match(store.ledger()[0].note,/账面.*实盘/);
+});
+
+test('cumulative consumption alerts do not change per-declaration automatic settlement', t => {
+  const store=fixture(t), material=store.listMaterials().find(m=>m.consumable&&m.quantity>=100);
+  store.borrow('owner',borrowInput(material,100));
+  const loan=store.loanRecords('owner')[0];
+  for(let i=0;i<2;i++) assert.equal(store.submitReturn('owner',returnInput(loan,loan.lines[0],{consumed:30})).status,'approved');
+  assert.equal(store.consumptionAlerts()[0].consumed,60);
+  assert.equal(store.loanRecords('owner')[0].remaining,40);
+  assert.equal(store.consumptionAlerts()[0].threshold,30);
+});

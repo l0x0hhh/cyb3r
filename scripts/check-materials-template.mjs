@@ -78,7 +78,7 @@ try {
   }});
   const selectedHtml = await renderToString(app);
   assert.ok(selectedHtml.includes('减少示例物资借用数量') && selectedHtml.includes('增加示例物资借用数量'));
-  assert.ok(selectedHtml.includes('数量合计 2') && selectedHtml.includes('示例物资已选择数量'));
+  assert.ok(selectedHtml.includes('数量合计 2') && selectedHtml.includes('示例物资借用数量，输入零取消'));
   console.log('Selection, quantity limits, cart synchronization and selected state passed.');
   const pointer = { button:0, isPrimary:true, pointerId:1 };
   const click = { detail:1 };
@@ -106,5 +106,13 @@ try {
   assert.equal(interactionState.cartItem(selected.id).quantity, 1, 'short click adds one and cancels the timer');
   interactionState.quantityClick({detail:0}, selected, 1);
   assert.equal(interactionState.cartItem(selected.id).quantity, 2, 'keyboard click increments one');
-  console.log('Long press, release suppression, cancellation and keyboard activation passed.');
+  interactionState.setCartQuantity(selected,3);
+  assert.equal(interactionState.cartItem(selected.id).quantity,3);
+  interactionState.setCartQuantity(selected,4);
+  assert.equal(interactionState.cartItem(selected.id).quantity,3,'direct input cannot exceed inventory');
+  interactionState.setCartQuantity(selected,1.5);
+  assert.equal(interactionState.cartItem(selected.id).quantity,3,'fractions are rejected');
+  interactionState.setCartQuantity(selected,0);
+  assert.equal(interactionState.cart.value.length,0,'direct zero removes selection');
+  console.log('Long press, direct entry, release suppression, cancellation and keyboard activation passed.');
 } finally { await server.close(); }

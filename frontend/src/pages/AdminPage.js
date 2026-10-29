@@ -141,6 +141,25 @@ const AdminPage = {
         <!-- 超级管理员专属账号管理面板：普通管理员不会看到该入口。 -->
         <transition name="admin-tab" :css="!prefersReducedMotion">
         <div v-if="activeTab === 'admin-management' && isSuperAdmin" class="tab-content">
+          <section class="email-settings-section" aria-label="系统运行维护配置">
+            <h2>系统运行维护</h2><p>磁盘每分钟检查；邮件使用已有SMTP发件配置。仅超级管理员可配置。</p>
+            <p v-if="operationsStatus">磁盘已用 {{operationsStatus.usedPercent}}%，可用 {{(operationsStatus.free/1024**3).toFixed(2)}} GiB · {{operationsStatus.level}}</p>
+            <p v-if="operationsStatus?.lastCheck?.error" role="alert">{{operationsStatus.lastCheck.error}}</p>
+            <form @submit.prevent="saveOperations">
+              <label class="email-settings-check"><input type="checkbox" v-model="operationsConfig.enabled">启用磁盘邮件告警</label>
+              <div class="email-settings-row">
+                <label>预警阈值（%）<input class="input" type="number" min="50" max="98" v-model.number="operationsConfig.warningPercent" required></label>
+                <label>严重阈值（%）<input class="input" type="number" min="51" max="99" v-model.number="operationsConfig.criticalPercent" required></label>
+                <label>重复提醒间隔（小时）<input class="input" type="number" min="1" max="168" v-model.number="operationsConfig.cooldownHours" required></label>
+              </div>
+              <label>告警接收邮箱（每行一个，最多10个）<textarea class="input textarea" v-model="operationsRecipients" rows="3"></textarea></label>
+              <p>应用停止时无法自行发信；独立服务状态检查工具可用于外部监控。异地存储暂未启用。</p>
+              <p role="status">{{operationsMessage}}</p>
+              <button class="btn btn--primary" :disabled="operationsBusy">保存运行配置</button>
+              <button class="btn btn--ghost" type="button" :disabled="operationsBusy" @click="checkOperations">按已保存配置立即检查</button>
+            </form>
+          </section>
+
           <div class="section-header">
             <div>
               <h2 class="section-title">管理员管理</h2>
@@ -1371,10 +1390,23 @@ const AdminPage = {
       adminUser.value = null;
     }
 
+    const operationsConfig=Vue.reactive({enabled:false,warningPercent:80,criticalPercent:90,cooldownHours:6});
+    const operationsRecipients=Vue.ref(''),operationsMessage=Vue.ref(''),operationsStatus=Vue.ref(null),operationsBusy=Vue.ref(false);
+    async function loadOperations(){
+      try{const res=await apiCall('GET','/api/admin/operations');if(!res.success)throw new Error(res.message);Object.assign(operationsConfig,res.data.settings);operationsRecipients.value=res.data.settings.recipients.join('\n');operationsStatus.value=res.data.status;}
+      catch(e){operationsMessage.value=e.message||'运行配置加载失败';}
+    }
+    async function saveOperations(){if(operationsBusy.value)return;operationsBusy.value=true;try{
+      const res=await apiCall('PUT','/api/admin/operations',{...operationsConfig,recipients:operationsRecipients.value.split(/[\n,;]+/).map(v=>v.trim()).filter(Boolean)});
+      if(!res.success)throw new Error(res.message);operationsMessage.value='运行配置已保存';await loadOperations();
+    }catch(e){operationsMessage.value=e.message;}finally{operationsBusy.value=false;}}
+    async function checkOperations(){if(operationsBusy.value)return;operationsBusy.value=true;try{
+      const res=await apiCall('POST','/api/admin/operations/check',{});if(!res.success)throw new Error(res.message);operationsStatus.value=res.data;operationsMessage.value='检查完成；未达阈值或处于提醒间隔内不会发信';
+    }catch(e){operationsMessage.value=e.message;}finally{operationsBusy.value=false;}}
     async function loadData() {
       // 每个管理区仅加载自己的业务数据；物资由MaterialsPage负责。
       if (activeArea.value === 'materials') return;
-      if (activeArea.value === 'accounts') { if(isSuperAdmin.value) await loadAdminUsers(); return; }
+      if (activeArea.value === 'accounts') { if(isSuperAdmin.value) { await loadAdminUsers(); await loadOperations(); } return; }
       const skipped = Promise.resolve({success:false, skipped:true});
       const requests = await Promise.all([
         hasAdminPermission('devices') ? apiCall('GET', '/api/devices') : skipped,
@@ -2465,6 +2497,7 @@ const AdminPage = {
     });
 
     return {
+      operationsConfig,operationsRecipients,operationsMessage,operationsStatus,operationsBusy,saveOperations,checkOperations,
       isLoggedIn, username, password, adminUser, isSuperAdmin, loginError, submitting, prefersReducedMotion, devices, records, activeRecords, archivedRecords, statistics,
           statisticsDisplay, statisticsReady, statisticsTrendAnimationKey,
       operationLogs, operationLogFilter, filteredOperationLogs,
